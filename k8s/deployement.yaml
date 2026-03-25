@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: Automation-api
+  namespace: Automation
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: Automation-api
+  template:
+    metadata:
+      labels:
+        app: Automation-api
+    spec:
+      containers:
+        - name: Automation-api
+          image: mpratyush54/Automation-backend:backend-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - secretRef:
+                name: Automation-env
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20

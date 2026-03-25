@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: Automation-api
+  namespace: Automation
+spec:
+  selector:
+    app: Automation-api
+  ports:
+    - port: 80
+      targetPort: 5000
