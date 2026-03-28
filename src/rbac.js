@@ -76,8 +76,8 @@ export const can = (role, permission) =>
 
 /**
  * Returns the nav items visible to the given role.
- * Admins and Super Admins always see Reports & Organization.
- * Team Leads see Reports (team level) and Organization (view only).
+ * Admins and Super Admins always see Stats, Report Center, and Organization.
+ * Team Leads see Stats, Report Center, and Organization.
  * Volunteers only see Dashboard, Logs, Events, Notifications, Profile.
  */
 export const getNavItems = (role) => {
@@ -85,7 +85,8 @@ export const getNavItems = (role) => {
     { to: '/dashboard',    label: 'Dashboard',    icon: 'LayoutDashboard' },
     { to: '/logs',         label: 'Logs',          icon: 'ClipboardList' },
     { to: '/events',       label: 'Events',        icon: 'Calendar' },
-    { to: '/reports',      label: 'Reports',       icon: 'BarChart3',   minRole: ROLES.TEAM_LEAD },
+    { to: '/reports',      label: 'Stats',         icon: 'BarChart3',   minRole: ROLES.TEAM_LEAD },
+    { to: '/report-center',label: 'Reports',       icon: 'FileText',    minRole: ROLES.TEAM_LEAD },
     { to: '/organization', label: 'Organization',  icon: 'Building2',   minRole: ROLES.TEAM_LEAD },
     { to: '/notifications',label: 'Notifications', icon: 'Bell' },
     { to: '/profile',      label: 'Profile',       icon: 'User' },

@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 're
 import { lazy, Suspense, useEffect } from 'react';
 import {
   LayoutDashboard, ClipboardList, Calendar,
-  BarChart3, Building2, Bell,
+  BarChart3, Building2, Bell, FileText,
 } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import { useAuthStore } from './store/auth';
@@ -14,11 +14,12 @@ const Dashboard    = lazy(() => import('./pages/Dashboard'));
 const Logs         = lazy(() => import('./pages/Logs'));
 const Events       = lazy(() => import('./pages/Events'));
 const Reports      = lazy(() => import('./pages/Reports'));
+const ReportCenter = lazy(() => import('./pages/ReportCenter'));
 const Organization = lazy(() => import('./pages/Organization'));
 const Notifications= lazy(() => import('./pages/Notifications'));
 const Profile      = lazy(() => import('./pages/Profile'));
 
-const NAV_ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell };
+const NAV_ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell, FileText };
 
 /* ── Guards ──────────────────────────────────────────────────── */
 const ProtectedRoute = ({ children }) => {
@@ -118,6 +119,9 @@ function App() {
                 {/* Team Lead+ */}
                 <Route path="reports" element={
                   <RoleGuard minRole={ROLES.TEAM_LEAD}><Reports /></RoleGuard>
+                } />
+                <Route path="report-center" element={
+                  <RoleGuard minRole={ROLES.TEAM_LEAD}><ReportCenter /></RoleGuard>
                 } />
                 <Route path="organization" element={
                   <RoleGuard minRole={ROLES.TEAM_LEAD}><Organization /></RoleGuard>
