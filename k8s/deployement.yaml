@@ -3,6 +3,9 @@ kind: Deployment
 metadata:
   name: Automation-api
   namespace: Automation
+  labels:
+    monitor: "true"   
+    project: Automation-api
 spec:
   replicas: 2
   strategy:
