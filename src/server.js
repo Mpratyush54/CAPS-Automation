@@ -32,6 +32,15 @@ const POD_NAME = process.env.POD_NAME || 'local';
 
 // Route imports
 const authRoutes = require('./routes/auth');
+const worklogRoutes = require('./routes/worklog');
+const reportRoutes = require('./routes/reports');
+const momRoutes = require('./routes/moms');
+const eventRoutes = require('./routes/events');
+const notificationRoutes = require('./routes/notifications');
+const dashboardRoutes = require('./routes/dashboard');
+const statsRoutes = require('./routes/stats');
+const organizationRoutes = require('./routes/organization');
+const profileRoutes = require('./routes/profile');
 // const webhookRoutes = require('./routes/webhook');
 
 const swaggerUi = require('swagger-ui-express');
@@ -212,14 +221,16 @@ app.get('/api/health', async (req, res) => {
 
 // ──────────────── API Routes ────────────────
 app.use('/api/auth', authRoutes); // Auth decides its own logic (e.g., signups are already guarded)
-// app.use('/api/questions', launchCheck, questionRoutes);
-// app.use('/api/answers', launchCheck, answerRoutes);
-// app.use('/api/users', launchCheck, userRoutes);
-// app.use('/api/moderation', launchCheck, moderationRoutes);
-// app.use('/api/tags', launchCheck, tagRoutes);
-// app.use('/api/admin', launchCheck, adminRoutes);
-// app.use('/api/config', configRoutes); // Config manages the launch status itself
-// app.use('/', webhookRoutes); // Top-level endpoint for external webhooks like Google Sheets
+app.use('/api', worklogRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/moms', momRoutes);
+app.use('/api/reports/moms', momRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/stats', statsRoutes);
+app.use('/api/organization', organizationRoutes);
+app.use('/api/profile', profileRoutes);
 
 
 // ──────────────── 404 Handler ────────────────
@@ -243,7 +254,7 @@ app.use((err, req, res, next) => {
 async function startServer() {
     try {
         await connectDB();
-        initCollections();
+        await initCollections();
         connectRedis();
 
         server.listen(PORT, () => {

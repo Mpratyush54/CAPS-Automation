@@ -1,4 +1,3 @@
-// ─── Database Connection ───────────────────────────────────────────
 const { MongoClient } = require('mongodb');
 require('dotenv').config();
 
@@ -13,7 +12,7 @@ async function connectDB() {
 
     await client.connect();
     db = client.db();
-    console.log('✅ Connected to MongoDB');
+    console.log('Connected to MongoDB');
 
     return db;
 }
@@ -28,7 +27,7 @@ async function closeDB() {
         await client.close();
         db = null;
         client = null;
-        console.log('🔌 MongoDB connection closed');
+        console.log('MongoDB connection closed');
     }
 }
 

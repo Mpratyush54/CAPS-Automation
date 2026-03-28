@@ -5,7 +5,8 @@ const jwt = require('jsonwebtoken');
 const validator = require('validator');
 const { v4: uuidv4 } = require('uuid');
 const { getDB } = require('../config/database');
-const { cacheSet, cacheDel } = require('../config/redis');
+const { cacheGet, cacheSet, cacheDel } = require('../config/redis');
+const { ObjectId } = require('mongodb');
 const { authenticate, authorize } = require('../middleware/auth');
 const { moderateContent } = require('../middleware/moderation');
 
@@ -17,6 +18,14 @@ function generateToken(user) {
         { id: user._id.toString(), role: user.role },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+}
+
+function generateRefreshToken(user) {
+    return jwt.sign(
+        { id: user._id.toString(), role: user.role, type: 'refresh' },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
     );
 }
 
@@ -66,13 +75,13 @@ function generatePassword(length = 10) {
  *                 type: string
  *     responses:
  *       201:
- *         description: Account created successfully
+ *         $ref: '#/components/responses/Created'
  *       400:
- *         description: Validation error
+ *         $ref: '#/components/responses/BadRequest'
  *       403:
- *         description: Signups disabled
+ *         $ref: '#/components/responses/Forbidden'
  *       409:
- *         description: Email already registered
+ *         $ref: '#/components/responses/Conflict'
  */
 router.post('/signup', moderateContent(['name', 'profession', 'expertise']), async (req, res) => {
     try {
@@ -190,13 +199,13 @@ router.post('/signup', moderateContent(['name', 'profession', 'expertise']), asy
  *                 type: string
  *     responses:
  *       200:
- *         description: Login successful
+ *         $ref: '#/components/responses/Ok'
  *       400:
- *         description: Bad request
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Invalid credentials
+ *         $ref: '#/components/responses/Unauthorized'
  *       403:
- *         description: Account suspended
+ *         $ref: '#/components/responses/Forbidden'
  */
 router.post('/login', async (req, res) => {
     try {
@@ -229,6 +238,7 @@ router.post('/login', async (req, res) => {
         );
 
         const token = generateToken(user);
+        const refreshToken = generateRefreshToken(user);
 
         // Cache user session
         await cacheSet(`user:${user._id}`, sanitizeUser(user), 300);
@@ -236,6 +246,7 @@ router.post('/login', async (req, res) => {
         res.json({
             message: 'Login successful!',
             token,
+            refreshToken,
             user: sanitizeUser(user),
         });
     } catch (err) {
@@ -244,12 +255,109 @@ router.post('/login', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/auth/refresh:
+ *   post:
+ *     summary: Refresh an access token using a refresh token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.post('/refresh', async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token is required.' });
+        }
+
+        const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+        if (decoded.type !== 'refresh') {
+            return res.status(401).json({ error: 'Invalid refresh token.' });
+        }
+
+        const db = getDB();
+        const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.id) });
+        if (!user) {
+            return res.status(401).json({ error: 'User not found.' });
+        }
+
+        const accessToken = generateToken(user);
+        const nextRefreshToken = generateRefreshToken(user);
+
+        res.json({
+            message: 'Token refreshed successfully.',
+            token: accessToken,
+            refreshToken: nextRefreshToken,
+            user: sanitizeUser(user),
+        });
+    } catch (err) {
+        res.status(401).json({ error: 'Invalid refresh token.' });
+    }
+});
+
 // ──────────────── GET /api/auth/me ────────────────
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Get the currently authenticated user
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/me', authenticate, (req, res) => {
     res.json({ user: req.user });
 });
 
 // ──────────────── POST /api/auth/change-password ────────────────
+/**
+ * @swagger
+ * /api/auth/change-password:
+ *   post:
+ *     summary: Change the current user's password
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.post('/change-password', authenticate, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -288,6 +396,22 @@ router.post('/change-password', authenticate, async (req, res) => {
 
 // ──────────────── POST /api/auth/bulk-create ────────────────
 // Admin-only: Create multiple users at once from a list of emails and names
+/**
+ * @swagger
+ * /api/auth/bulk-create:
+ *   post:
+ *     summary: Bulk create users
+ *     tags: [Auth]
+ *     responses:
+ *       201:
+ *         $ref: '#/components/responses/Created'
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 router.post('/bulk-create', authenticate, authorize('admin'), async (req, res) => {
     try {
         const { users } = req.body;
@@ -372,6 +496,27 @@ router.post('/bulk-create', authenticate, authorize('admin'), async (req, res) =
 });
 
 // ──────────────── POST /api/auth/logout ────────────────
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Log out the current user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.post('/logout', authenticate, async (req, res) => {
     try {
         await cacheDel(`user:${req.user._id}`);

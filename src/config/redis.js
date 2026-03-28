@@ -59,6 +59,17 @@ async function cacheSet(key, data, ttlSeconds = 300) {
     }
 }
 
+async function cacheWrap(key, ttlSeconds, compute) {
+    const cached = await cacheGet(key);
+    if (cached !== null) {
+        return { value: cached, fromCache: true };
+    }
+
+    const value = await compute();
+    await cacheSet(key, value, ttlSeconds);
+    return { value, fromCache: false };
+}
+
 async function cacheDel(pattern) {
     if (!redis) return;
     try {
@@ -81,4 +92,4 @@ async function closeRedis() {
     }
 }
 
-module.exports = { connectRedis, getRedis, cacheGet, cacheSet, cacheDel, closeRedis };
+module.exports = { connectRedis, getRedis, cacheGet, cacheSet, cacheWrap, cacheDel, closeRedis };
