@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, BellOff, Send, CheckCheck, Info, AlertTriangle, Calendar, Check, X, ChevronRight } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
+import { api, getErrorMessage, unwrap } from '../lib/api';
+import { normalizeNotification } from '../lib/adapters';
 
 const SEED = [
   { id: 1, type: 'warning', title: 'Weekly report missing', body: 'Outreach Team has not submitted the weekly report for 2026-W12. Admin and Super Admin escalation has been scheduled because the deadline passed.', time: 'Just now', fullTime: 'Mar 29, 2026 - 09:10 AM', read: false, from: 'System', role: 'System', audience: 'Outreach Team, Community Wing Admins' },
@@ -67,12 +69,52 @@ const DetailModal = ({ notification, onClose, onMarkRead }) => {
   );
 };
 
-const SendModal = ({ onClose, role, currentUser }) => {
+const SendModal = ({ onClose, role, currentUser, onError, onSent }) => {
   const [form, setForm] = useState({ title: '', body: '', type: 'info' });
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const audienceOptions = role === ROLES.TEAM_LEAD ? [currentUser?.committee ? `${currentUser.committee} (team members)` : 'Team Members', 'Specific Member'] : role === ROLES.ADMIN ? [currentUser?.wing ? `Entire ${currentUser.wing}` : 'Entire Label 1 Group', 'Selected Label 2 Group', 'All Admins'] : ['Entire Organization', 'Selected Label 1 Group', 'Selected Label 2 Group', 'Specific Role'];
   const [audience, setAudience] = useState(audienceOptions[0]);
   const scopeLabel = role === ROLES.TEAM_LEAD ? `${currentUser?.wing || 'Label 1'} / ${currentUser?.committee || 'Label 2'}` : role === ROLES.ADMIN ? currentUser?.wing || 'Your Label 1 Group' : 'Organization-wide';
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    onError?.(null);
+    try {
+      await api.post('/api/notifications', {
+        type: form.type,
+        title: form.title,
+        body: form.body,
+        audienceType: audience.toLowerCase().includes('organization')
+          ? 'global'
+          : audience.toLowerCase().includes('role')
+          ? 'specific_role'
+          : audience.toLowerCase().includes('member')
+          ? 'specific_member'
+          : role === ROLES.TEAM_LEAD
+          ? 'committee'
+          : 'wing',
+      });
+      onSent?.({
+        id: `temp-${Date.now()}`,
+        type: form.type,
+        title: form.title,
+        body: form.body,
+        time: 'Just now',
+        fullTime: new Date().toLocaleString(),
+        read: true,
+        from: currentUser?.name || 'You',
+        role,
+        audience,
+      });
+      onClose();
+    } catch (sendError) {
+      onError?.(getErrorMessage(sendError, 'Unable to send notification.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <Modal title="Send Notification" onClose={onClose}>
@@ -80,14 +122,14 @@ const SendModal = ({ onClose, role, currentUser }) => {
         <Send size={12} style={{ flexShrink: 0 }} />
         Sending as: <strong style={{ margin: '0 0.25rem' }}>{currentUser?.name || 'You'}</strong> ({role}) - Scope: {scopeLabel}
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); onClose(); }} style={{ display: 'grid', gap: '0.875rem' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.875rem' }}>
         <div className="mobile-safe-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div><label className="input-label">Audience *</label><select className="input-field" value={audience} onChange={(e) => setAudience(e.target.value)}>{audienceOptions.map((item) => <option key={item}>{item}</option>)}</select></div>
           <div><label className="input-label">Type</label><select className="input-field" value={form.type} onChange={(e) => set('type', e.target.value)}>{['info', 'event', 'warning'].map((type) => <option key={type} value={type}>{typeStyle[type]?.label}</option>)}</select></div>
         </div>
         <div><label className="input-label">Title *</label><input className="input-field" value={form.title} onChange={(e) => set('title', e.target.value)} required /></div>
         <div><label className="input-label">Message *</label><textarea className="input-field" rows={5} value={form.body} onChange={(e) => set('body', e.target.value)} required style={{ resize: 'vertical' }} /></div>
-        <div className="card-action-row"><button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button><button type="submit" className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}><Send size={14} /> Send Notification</button></div>
+        <div className="card-action-row"><button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button><button type="submit" className="btn-primary" disabled={submitting} style={{ flex: 1, justifyContent: 'center' }}><Send size={14} /> {submitting ? 'Sending...' : 'Send Notification'}</button></div>
       </form>
     </Modal>
   );
@@ -99,17 +141,55 @@ const Notifications = () => {
   const [filter, setFilter] = useState('All');
   const [detail, setDetail] = useState(null);
   const [sendModal, setSend] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadNotifications = async () => {
+      try {
+        const response = await api.get('/api/notifications', {
+          params: { filter, page: 1, pageSize: 50 },
+        });
+        const payload = unwrap(response);
+        const rows = payload?.rows || payload?.items || [];
+        if (mounted && rows.length) {
+          setNotifications(rows.map(normalizeNotification));
+        }
+      } catch {
+        // Keep seeded notifications if the backend payload does not match yet.
+      }
+    };
+    loadNotifications();
+    return () => {
+      mounted = false;
+    };
+  }, [filter]);
 
   const unread = notifications.filter((item) => !item.read).length;
   const filtered = notifications.filter((item) => filter === 'All' ? true : filter === 'Unread' ? !item.read : item.read);
-  const markRead = (id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item));
-  const markAll = () => setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+  const markRead = async (id) => {
+    setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item));
+    try {
+      await api.patch(`/api/notifications/${id}/read`, { read: true });
+    } catch {
+      // Keep optimistic update.
+    }
+  };
+  const markAll = async () => {
+    setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+    try {
+      await api.patch('/api/notifications/read-all', {});
+    } catch {
+      // Keep optimistic update.
+    }
+  };
   const canSend = can(role, 'sendToCommittee');
 
   return (
     <>
       <TopBar title="Notifications" />
       <div className="page-body">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>{['All', 'Unread', 'Read'].map((item) => <button key={item} className={`chip${filter === item ? ' active' : ''}`} onClick={() => setFilter(item)}>{item}{item === 'Unread' && unread > 0 ? ` (${unread})` : ''}</button>)}</div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -152,7 +232,7 @@ const Notifications = () => {
         </div>
 
         {detail && <DetailModal notification={detail} onClose={() => setDetail(null)} onMarkRead={markRead} />}
-        {sendModal && <SendModal onClose={() => setSend(false)} role={role} currentUser={user} />}
+        {sendModal && <SendModal onClose={() => setSend(false)} role={role} currentUser={user} onError={setError} onSent={(item) => setNotifications((current) => [item, ...current])} />}
       </div>
     </>
   );

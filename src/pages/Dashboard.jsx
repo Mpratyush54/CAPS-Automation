@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import {
   Clock, CheckCircle2, TrendingUp, Calendar, PlusCircle,
@@ -6,48 +6,97 @@ import {
 } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
-import { ROLES, can } from '../rbac';
+import { ROLES } from '../rbac';
+import { api, getErrorMessage, unwrap } from '../lib/api';
 
-/* ── Shared data ──────────────────────────────────────────────── */
-const weeklyData = [
-  { day: 'Mon', hrs: 5, tasks: 3 },
-  { day: 'Tue', hrs: 7, tasks: 5 },
-  { day: 'Wed', hrs: 4, tasks: 2 },
-  { day: 'Thu', hrs: 8, tasks: 6 },
-  { day: 'Fri', hrs: 6, tasks: 4 },
-  { day: 'Sat', hrs: 3, tasks: 2 },
-  { day: 'Sun', hrs: 2, tasks: 1 },
-];
+const fallbackDashboard = {
+  volunteer: {
+    hero: { subtitle: 'Ready to log your work today?' },
+    kpis: [
+      { key: 'myHoursWeek', label: 'My Hours (Week)', value: '14h', icon: Clock, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
+      { key: 'myTaskCount', label: 'My Tasks', value: '3', icon: ClipboardList, color: '#059669', bg: '#d1fae5' },
+      { key: 'assignedEventsCount', label: 'Events Assigned', value: '2', icon: Calendar, color: '#d97706', bg: '#fef3c7' },
+    ],
+    myTasks: [
+      { id: 1, title: 'Prepare onboarding doc', deadline: '2026-03-27', eventTitle: 'Volunteer Drive', status: 'Pending' },
+      { id: 2, title: 'Attend health camp setup', deadline: '2026-03-28', eventTitle: 'Health Camp', status: 'In Progress' },
+      { id: 3, title: 'Submit volunteer report', deadline: '2026-03-30', eventTitle: null, status: 'Pending' },
+    ],
+    weeklyHoursChart: [
+      { day: 'Mon', hours: 5, tasks: 3 },
+      { day: 'Tue', hours: 7, tasks: 5 },
+      { day: 'Wed', hours: 4, tasks: 2 },
+      { day: 'Thu', hours: 8, tasks: 6 },
+      { day: 'Fri', hours: 6, tasks: 4 },
+      { day: 'Sat', hours: 3, tasks: 2 },
+      { day: 'Sun', hours: 2, tasks: 1 },
+    ],
+  },
+  teamLead: {
+    hero: { subtitle: "Your team's daily report is waiting." },
+    kpis: [
+      { label: 'Team Members', value: '12', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
+      { label: 'Team Hours (Week)', value: '86h', icon: Clock, color: '#059669', bg: '#d1fae5' },
+      { label: 'Pending Tasks', value: '7', icon: ClipboardList, color: '#d97706', bg: '#fef3c7' },
+      { label: 'Logs Submitted', value: '34', icon: CheckCircle2, color: '#059669', bg: '#d1fae5' },
+    ],
+    teamLogsToday: [
+      { member: 'Priya Nair', task: 'Sprint Review', time: '2h 30m', status: 'Completed' },
+      { member: 'Rahul Sharma', task: 'API Integration', time: '3h 00m', status: 'In Progress' },
+      { member: 'Sam Lee', task: 'Unit Tests', time: '1h 45m', status: 'Completed' },
+      { member: 'Carlos V.', task: 'DB Migration', time: '2h 00m', status: 'In Progress' },
+    ],
+    committeeHoursWeekChart: [
+      { day: 'Mon', hours: 5 },
+      { day: 'Tue', hours: 7 },
+      { day: 'Wed', hours: 4 },
+      { day: 'Thu', hours: 8 },
+      { day: 'Fri', hours: 6 },
+      { day: 'Sat', hours: 3 },
+      { day: 'Sun', hours: 2 },
+    ],
+  },
+  admin: {
+    hero: { subtitle: 'Monitor wing performance and manage events.' },
+    kpis: [
+      { label: 'Wing Members', value: '42', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
+      { label: 'Committees', value: '5', icon: Building2, color: '#059669', bg: '#d1fae5' },
+      { label: 'Wing Hours (Week)', value: '312h', icon: Clock, color: '#d97706', bg: '#fef3c7' },
+      { label: 'Active Events', value: '3', icon: Calendar, color: '#7c3aed', bg: '#ede9fe' },
+    ],
+    committeePerformanceRows: [
+      { wing: 'Tech Wing', members: 24, hours: 186, logs: 48, completion: '88%' },
+      { wing: 'Community Wing', members: 42, hours: 312, logs: 76, completion: '73%' },
+      { wing: 'Health Wing', members: 30, hours: 224, logs: 55, completion: '81%' },
+    ],
+  },
+  superAdmin: {
+    hero: { subtitle: 'Full system status is live.' },
+    kpis: [
+      { label: 'Total Members', value: '114', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)', delta: '-' },
+      { label: 'Total Hours (Week)', value: '--', icon: Clock, color: '#059669', bg: '#d1fae5', delta: '-' },
+      { label: 'Active Wings', value: '-', icon: Building2, color: '#d97706', bg: '#fef3c7', delta: '-' },
+      { label: 'Global Events', value: '-', icon: Calendar, color: '#7c3aed', bg: '#ede9fe', delta: '-' },
+    ],
+    organizationWideHoursWeekChart: [
+      { day: 'Mon', hours: 42 },
+      { day: 'Tue', hours: 68 },
+      { day: 'Wed', hours: 55 },
+      { day: 'Thu', hours: 80 },
+      { day: 'Fri', hours: 62 },
+      { day: 'Sat', hours: 28 },
+      { day: 'Sun', hours: 18 },
+    ],
+    wingOverviewRows: [
+      { wing: 'Tech Wing', members: 24, completion: '88%' },
+      { wing: 'Community Wing', members: 42, completion: '73%' },
+      { wing: 'Health Wing', members: 30, completion: '81%' },
+      { wing: 'HR Wing', members: 18, completion: '92%' },
+    ],
+  },
+};
 
-const myTasks = [
-  { id: 1, title: 'Prepare onboarding doc', deadline: 'Mar 27', event: 'Volunteer Drive', status: 'Pending' },
-  { id: 2, title: 'Attend health camp setup', deadline: 'Mar 28', event: 'Health Camp', status: 'In Progress' },
-  { id: 3, title: 'Submit volunteer report', deadline: 'Mar 30', event: null, status: 'Pending' },
-];
-
-const teamLogs = [
-  { member: 'Priya Nair', task: 'Sprint Review', time: '2h 30m', status: 'Completed' },
-  { member: 'Rahul Sharma', task: 'API Integration', time: '3h 00m', status: 'In Progress' },
-  { member: 'Sam Lee', task: 'Unit Tests', time: '1h 45m', status: 'Completed' },
-  { member: 'Carlos V.', task: 'DB Migration', time: '2h 00m', status: 'In Progress' },
-];
-
-const wingStats = [
-  { wing: 'Tech Wing', members: 24, hours: 186, logs: 48, completion: '88%' },
-  { wing: 'Community Wing', members: 42, hours: 312, logs: 76, completion: '73%' },
-  { wing: 'Health Wing', members: 30, hours: 224, logs: 55, completion: '81%' },
-  { wing: 'HR Wing', members: 18, hours: 132, logs: 32, completion: '92%' },
-];
-
-const globalWeekly = [
-  { day: 'Mon', hrs: 42 }, { day: 'Tue', hrs: 68 }, { day: 'Wed', hrs: 55 },
-  { day: 'Thu', hrs: 80 }, { day: 'Fri', hrs: 62 }, { day: 'Sat', hrs: 28 }, { day: 'Sun', hrs: 18 },
-];
-
-/* ── Sub-components ──────────────────────────────────────────── */
-
-/** Hero banner — same for all but copy changes by role */
-const HeroBanner = ({ user, role }) => {
+const HeroBanner = ({ user, role, subtitle }) => {
   const greeting = () => {
     const h = new Date().getHours();
     if (h < 12) return 'Good morning';
@@ -55,25 +104,13 @@ const HeroBanner = ({ user, role }) => {
     return 'Good evening';
   };
 
-  const subtitles = {
-    [ROLES.VOLUNTEER]:   "Ready to log your work today?",
-    [ROLES.TEAM_LEAD]:   "Your team's daily report is waiting.",
-    [ROLES.ADMIN]:       "Monitor wing performance and manage events.",
-    [ROLES.SUPER_ADMIN]: "Full system status is live.",
-  };
-
   return (
-    <div style={{
-      background: 'var(--gradient-primary)', borderRadius: '1rem', padding: '1.5rem 2rem',
-      marginBottom: '1.25rem', color: '#fff', display: 'flex', alignItems: 'center',
-      justifyContent: 'space-between', boxShadow: '0 8px 24px rgba(67,67,213,0.25)',
-      position: 'relative', overflow: 'hidden',
-    }}>
+    <div style={{ background: 'var(--gradient-primary)', borderRadius: '1rem', padding: '1.5rem 2rem', marginBottom: '1.25rem', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 8px 24px rgba(67,67,213,0.25)', position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: '-40%', right: '-5%', width: '200px', height: '200px', background: 'rgba(255,255,255,0.07)', borderRadius: '9999px', pointerEvents: 'none' }} />
       <div style={{ minWidth: 0 }}>
         <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.85, fontWeight: 500 }}>{greeting()},</p>
         <h2 style={{ margin: '0.25rem 0 0.375rem', fontSize: '1.375rem', fontWeight: 700, letterSpacing: '-0.03em', color: '#fff' }}>{user?.name || 'User'}</h2>
-        <p style={{ margin: 0, fontSize: '0.8125rem', opacity: 0.8, overflowWrap: 'anywhere' }}>{subtitles[role]}</p>
+        <p style={{ margin: 0, fontSize: '0.8125rem', opacity: 0.8, overflowWrap: 'anywhere' }}>{subtitle}</p>
       </div>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', background: 'rgba(255,255,255,0.2)', padding: '0.375rem 1rem', borderRadius: '9999px', fontSize: '0.8125rem', fontWeight: 600, flexShrink: 0 }}>
         <Shield size={13} /> {role}
@@ -82,53 +119,49 @@ const HeroBanner = ({ user, role }) => {
   );
 };
 
-/* ── Role-specific dashboards ────────────────────────────────── */
-
-const VolunteerDashboard = () => (
-    <div className="stack-gap-1">
-    {/* Stats */}
-    <div className="grid-cols-3" style={{ marginBottom: 0 }}>
-      {[
-        { label: 'My Hours (Week)', value: '14h', icon: Clock, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
-        { label: 'My Tasks', value: '3', icon: ClipboardList, color: '#059669', bg: '#d1fae5' },
-        { label: 'Events Assigned', value: '2', icon: Calendar, color: '#d97706', bg: '#fef3c7' },
-      ].map(({ label, value, icon: Icon, color, bg }) => (
-        <div key={label} className="card" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+const KpiGrid = ({ items, columns = 4 }) => (
+  <div className={`grid-cols-${columns}`} style={{ marginBottom: 0 }}>
+    {items.map(({ label, value, icon, color, bg, delta }) => {
+      const Icon = icon;
+      return (
+        <div key={label} className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
           <div style={{ width: '2.5rem', height: '2.5rem', borderRadius: '0.625rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Icon size={16} style={{ color }} />
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: '1.375rem', fontWeight: 700, letterSpacing: '-0.03em' }}>{value}</p>
+            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.03em' }}>{value}</p>
             <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>{label}</p>
+            {delta ? <p style={{ margin: '2px 0 0', fontSize: '0.68rem', color: 'var(--color-on-surface-variant)' }}>{delta}</p> : null}
           </div>
         </div>
-      ))}
-    </div>
+      );
+    })}
+  </div>
+);
 
-    {/* My Tasks + quick add log */}
+const VolunteerDashboard = ({ data }) => (
+  <div className="stack-gap-1">
+    <KpiGrid items={data.kpis} columns={3} />
     <div className="grid-sidebar-right">
       <div className="card">
         <div className="card-flex-between" style={{ marginBottom: '0.875rem' }}>
           <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600 }}>My Tasks</h3>
-          <span className="badge badge-neutral">{myTasks.length} active</span>
-        </div>
-        {myTasks.map(t => (
-          <div key={t.id} style={{ display: 'flex', gap: '0.75rem', padding: '0.625rem 0', borderBottom: '1px solid var(--color-surface-low)' }}>
-            <div style={{ width: '3px', background: t.status === 'In Progress' ? 'var(--color-primary)' : 'var(--color-surface-highest)', borderRadius: '9999px', flexShrink: 0 }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600 }}>{t.title}</p>
-              <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>
-                Due {t.deadline}{t.event ? ` · ${t.event}` : ''}
-              </p>
-            </div>
-            <span className={`badge ${t.status === 'In Progress' ? 'badge-primary' : 'badge-neutral'}`}>
-              {t.status}
-            </span>
+          <span className="badge badge-neutral">
+            {data?.myTasks?.length || 0} active
+          </span>        </div>
+        {(data?.myTasks || []).map((task) => (
+          <div key={task.id} style={{ display: 'flex', gap: '0.75rem', padding: '0.625rem 0', borderBottom: '1px solid var(--color-surface-low)' }}>
+          <div style={{ width: '3px', background: task.status === 'In Progress' ? 'var(--color-primary)' : 'var(--color-surface-highest)', borderRadius: '9999px', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600 }}>{task.title}</p>
+            <p style={{ margin: '2px 0 0', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>
+              Due {task.deadline}{task.eventTitle ? ` · ${task.eventTitle}` : ''}
+            </p>
           </div>
+          <span className={`badge ${task.status === 'In Progress' ? 'badge-primary' : 'badge-neutral'}`}>{task.status}</span>
+        </div>
         ))}
       </div>
-
-      {/* Quick add log card */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: 'var(--gradient-primary)', color: '#fff', gap: '0.875rem', minWidth: 0 }}>
         <div style={{ width: '3rem', height: '3rem', background: 'rgba(255,255,255,0.2)', borderRadius: '0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <PlusCircle size={24} color="#fff" />
@@ -137,52 +170,28 @@ const VolunteerDashboard = () => (
           <p style={{ margin: 0, fontWeight: 700, fontSize: '1rem' }}>Log Your Work</p>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', opacity: 0.85 }}>Track today's activities</p>
         </div>
-        <a href="/logs" style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none' }}>
-          + Add Log
-        </a>
+        <a href="/logs" style={{ background: 'rgba(255,255,255,0.25)', color: '#fff', padding: '0.5rem 1.25rem', borderRadius: '0.5rem', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none' }}>+ Add Log</a>
       </div>
     </div>
-
-    {/* My weekly chart */}
     <div className="card">
       <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>My Weekly Hours</h3>
       <ResponsiveContainer width="100%" height={160}>
-        <BarChart data={weeklyData}>
+        <BarChart data={data.weeklyHoursChart}>
           <CartesianGrid vertical={false} stroke="var(--color-surface-high)" />
           <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} width={28} />
           <Tooltip contentStyle={{ background: 'var(--color-surface-lowest)', border: 'none', borderRadius: '0.5rem', boxShadow: 'var(--shadow-card)', fontSize: '0.8125rem' }} />
-          <Bar dataKey="hrs" name="Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="hours" name="Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
   </div>
 );
 
-const TeamLeadDashboard = () => (
+const TeamLeadDashboard = ({ data }) => (
   <div className="stack-gap-1">
-    {/* KPIs */}
-    <div className="grid-cols-4" style={{ marginBottom: 0 }}>
-      {[
-        { label: 'Team Members', value: '12', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
-        { label: "Team Hours (Week)", value: '86h', icon: Clock, color: '#059669', bg: '#d1fae5' },
-        { label: 'Pending Tasks', value: '7', icon: ClipboardList, color: '#d97706', bg: '#fef3c7' },
-        { label: 'Logs Submitted', value: '34', icon: CheckCircle2, color: '#059669', bg: '#d1fae5' },
-      ].map(({ label, value, icon: Icon, color, bg }) => (
-        <div key={label} className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
-          <div style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon size={14} style={{ color }} />
-          </div>
-          <div>
-            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.03em' }}>{value}</p>
-            <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-on-surface-variant)' }}>{label}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-
+    <KpiGrid items={data.kpis} columns={4} />
     <div className="mobile-safe-grid" style={{ gridTemplateColumns: '1fr 1.2fr' }}>
-      {/* Team logs table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600 }}>Team Logs Today</h3>
@@ -191,39 +200,30 @@ const TeamLeadDashboard = () => (
         <table className="data-table">
           <thead><tr><th>Member</th><th>Task</th><th>Time</th><th>Status</th></tr></thead>
           <tbody>
-            {teamLogs.map((l, i) => (
-              <tr key={i}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div className="avatar" style={{ width: '1.5rem', height: '1.5rem', fontSize: '0.6rem', flexShrink: 0 }}>{l.member[0]}</div>
-                    <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{l.member}</span>
-                  </div>
-                </td>
-                <td style={{ fontSize: '0.8125rem' }}>{l.task}</td>
-                <td style={{ fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>{l.time}</td>
-                <td><span className={`badge ${l.status === 'Completed' ? 'badge-success' : 'badge-warning'}`}>{l.status}</span></td>
+            {data.teamLogsToday.map((log, index) => (
+              <tr key={`${log.member}-${index}`}>
+                <td><div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><div className="avatar" style={{ width: '1.5rem', height: '1.5rem', fontSize: '0.6rem', flexShrink: 0 }}>{log.member?.[0] || 'U'}</div><span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>{log.member}</span></div></td>
+                <td style={{ fontSize: '0.8125rem' }}>{log.task}</td>
+                <td style={{ fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>{log.time}</td>
+                <td><span className={`badge ${log.status === 'Completed' ? 'badge-success' : 'badge-warning'}`}>{log.status}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {/* Chart */}
       <div className="card">
         <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>Committee Hours (Week)</h3>
         <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={weeklyData}>
+          <BarChart data={data.committeeHoursWeekChart}>
             <CartesianGrid vertical={false} stroke="var(--color-surface-high)" />
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} width={28} />
             <Tooltip contentStyle={{ background: 'var(--color-surface-lowest)', border: 'none', borderRadius: '0.5rem', boxShadow: 'var(--shadow-card)', fontSize: '0.8125rem' }} />
-            <Bar dataKey="hrs" name="Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="hours" name="Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
-
-    {/* Send notification CTA */}
     <div className="card card-flex-between" style={{ alignItems: 'center', background: 'var(--color-secondary-fixed)' }}>
       <div style={{ width: '3rem', height: '3rem', background: '#b095ff', borderRadius: '0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <Bell size={20} color="#fff" />
@@ -237,29 +237,9 @@ const TeamLeadDashboard = () => (
   </div>
 );
 
-const AdminDashboard = () => (
+const AdminDashboard = ({ data }) => (
   <div className="stack-gap-1">
-    {/* Wing KPIs */}
-    <div className="grid-cols-4">
-      {[
-        { label: 'Wing Members', value: '42', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
-        { label: 'Committees', value: '5', icon: Building2, color: '#059669', bg: '#d1fae5' },
-        { label: 'Wing Hours (Week)', value: '312h', icon: Clock, color: '#d97706', bg: '#fef3c7' },
-        { label: 'Active Events', value: '3', icon: Calendar, color: '#7c3aed', bg: '#ede9fe' },
-      ].map(({ label, value, icon: Icon, color, bg }) => (
-        <div key={label} className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
-          <div style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon size={14} style={{ color }} />
-          </div>
-          <div>
-            <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.03em' }}>{value}</p>
-            <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--color-on-surface-variant)' }}>{label}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-
-    {/* Committee performance table */}
+    <KpiGrid items={data.kpis} columns={4} />
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600 }}>Committee Performance</h3>
@@ -268,18 +248,18 @@ const AdminDashboard = () => (
       <table className="data-table">
         <thead><tr><th>Committee</th><th>Members</th><th>Hours</th><th>Logs</th><th>Completion</th></tr></thead>
         <tbody>
-          {wingStats.slice(0, 3).map(w => (
-            <tr key={w.wing}>
-              <td style={{ fontWeight: 600 }}>{w.wing}</td>
-              <td>{w.members}</td>
-              <td>{w.hours}h</td>
-              <td>{w.logs}</td>
+          {data.committeePerformanceRows.map((row) => (
+            <tr key={row.wing}>
+              <td style={{ fontWeight: 600 }}>{row.wing}</td>
+              <td>{row.members}</td>
+              <td>{row.hours}h</td>
+              <td>{row.logs}</td>
               <td>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <div style={{ flex: 1, height: '4px', background: 'var(--color-surface-high)', borderRadius: '9999px' }}>
-                    <div style={{ width: w.completion, height: '100%', background: 'var(--gradient-primary)', borderRadius: '9999px' }} />
+                    <div style={{ width: row.completion, height: '100%', background: 'var(--gradient-primary)', borderRadius: '9999px' }} />
                   </div>
-                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-primary)', minWidth: '2.5rem', textAlign: 'right' }}>{w.completion}</span>
+                  <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-primary)', minWidth: '2.5rem', textAlign: 'right' }}>{row.completion}</span>
                 </div>
               </td>
             </tr>
@@ -287,66 +267,45 @@ const AdminDashboard = () => (
         </tbody>
       </table>
     </div>
-
-    {/* Quick actions */}
     <div className="grid-cols-3">
       {[
         { label: 'Create Wing Event', icon: Calendar, href: '/events', color: 'var(--color-primary)', bg: 'var(--color-primary-fixed)' },
         { label: 'Manage Committees', icon: Building2, href: '/organization', color: '#059669', bg: '#d1fae5' },
         { label: 'Send Wing Notification', icon: Bell, href: '/notifications', color: '#7c3aed', bg: '#ede9fe' },
-      ].map(({ label, icon: Icon, href, color, bg }) => (
-        <a key={label} href={href} style={{ textDecoration: 'none' }}>
-          <div className="card card-flex-between" style={{ alignItems: 'center', cursor: 'pointer', transition: 'box-shadow 0.15s' }}>
-            <div style={{ width: '2.5rem', height: '2.5rem', borderRadius: '0.625rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Icon size={16} style={{ color }} />
+      ].map(({ label, icon, href, color, bg }) => {
+        const Icon = icon;
+        return (
+          <a key={label} href={href} style={{ textDecoration: 'none' }}>
+            <div className="card card-flex-between" style={{ alignItems: 'center', cursor: 'pointer', transition: 'box-shadow 0.15s' }}>
+              <div style={{ width: '2.5rem', height: '2.5rem', borderRadius: '0.625rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon size={16} style={{ color }} />
+              </div>
+              <span className="text-wrap-anywhere" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-on-surface)' }}>{label}</span>
+              <ArrowUpRight size={14} style={{ color: 'var(--color-outline)', marginLeft: 'auto' }} />
             </div>
-            <span className="text-wrap-anywhere" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-on-surface)' }}>{label}</span>
-            <ArrowUpRight size={14} style={{ color: 'var(--color-outline)', marginLeft: 'auto' }} />
-          </div>
-        </a>
-      ))}
+          </a>
+        );
+      })}
     </div>
   </div>
 );
 
-const SuperAdminDashboard = () => (
+const SuperAdminDashboard = ({ data }) => (
   <div className="stack-gap-1">
-    {/* Global KPIs */}
-    <div className="grid-cols-4">
-      {[
-        { label: 'Total Members', value: '114', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)', delta: '+3 this week' },
-        { label: 'Total Hours (Week)', value: '854h', icon: Clock, color: '#059669', bg: '#d1fae5', delta: '↑ 12%' },
-        { label: 'Active Wings', value: '4', icon: Building2, color: '#d97706', bg: '#fef3c7', delta: 'All active' },
-        { label: 'Global Events', value: '10', icon: Calendar, color: '#7c3aed', bg: '#ede9fe', delta: '5 upcoming' },
-      ].map(({ label, value, icon: Icon, color, bg, delta }) => (
-        <div key={label} className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span className="card-title" style={{ margin: 0 }}>{label}</span>
-            <div style={{ width: '2rem', height: '2rem', borderRadius: '0.5rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon size={13} style={{ color }} />
-            </div>
-          </div>
-          <p style={{ margin: '0 0 0.25rem', fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.04em' }}>{value}</p>
-          <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>{delta}</p>
-        </div>
-      ))}
-    </div>
-
-    {/* Global chart */}
+    <KpiGrid items={data.kpis} columns={4} />
     <div className="mobile-safe-grid" style={{ gridTemplateColumns: '1.4fr 1fr' }}>
       <div className="card">
         <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>Organization-Wide Hours (Week)</h3>
         <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={globalWeekly}>
+          <BarChart data={data.organizationWideHoursWeekChart}>
             <CartesianGrid vertical={false} stroke="var(--color-surface-high)" />
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 11, fill: 'var(--color-on-surface-variant)' }} axisLine={false} tickLine={false} width={32} />
             <Tooltip contentStyle={{ background: 'var(--color-surface-lowest)', border: 'none', borderRadius: '0.5rem', boxShadow: 'var(--shadow-card)', fontSize: '0.8125rem' }} />
-            <Bar dataKey="hrs" name="Total Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="hours" name="Total Hours" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
-
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1rem 1.25rem' }}>
           <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600 }}>Wing Overview</h3>
@@ -354,65 +313,158 @@ const SuperAdminDashboard = () => (
         <table className="data-table">
           <thead><tr><th>Wing</th><th>Members</th><th>Completion</th></tr></thead>
           <tbody>
-            {wingStats.map(w => (
-              <tr key={w.wing}>
-                <td style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{w.wing}</td>
-                <td style={{ fontSize: '0.8125rem' }}>{w.members}</td>
-                <td>
-                  <span className={`badge ${parseInt(w.completion) >= 85 ? 'badge-success' : 'badge-warning'}`}>{w.completion}</span>
-                </td>
+            {data.wingOverviewRows.map((row) => (
+              <tr key={row.wing}>
+                <td style={{ fontWeight: 600, fontSize: '0.8125rem' }}>{row.wing}</td>
+                <td style={{ fontSize: '0.8125rem' }}>{row.members}</td>
+                <td><span className={`badge ${parseInt(row.completion, 10) >= 85 ? 'badge-success' : 'badge-warning'}`}>{row.completion}</span></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
-
-    {/* Quick actions */}
     <div className="grid-cols-4">
       {[
         { label: 'Manage Users', icon: Users, href: '/organization', color: '#4343d5', bg: 'var(--color-primary-fixed)' },
         { label: 'Create Global Event', icon: Calendar, href: '/events', color: '#059669', bg: '#d1fae5' },
         { label: 'Global Notification', icon: Bell, href: '/notifications', color: '#7c3aed', bg: '#ede9fe' },
         { label: 'System Reports', icon: TrendingUp, href: '/reports', color: '#d97706', bg: '#fef3c7' },
-      ].map(({ label, icon: Icon, href, color, bg }) => (
-        <a key={label} href={href} style={{ textDecoration: 'none' }}>
-          <div className="card card-flex-between" style={{ alignItems: 'center', cursor: 'pointer' }}>
-            <div style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Icon size={14} style={{ color }} />
+      ].map(({ label, icon, href, color, bg }) => {
+        const Icon = icon;
+        return (
+          <a key={label} href={href} style={{ textDecoration: 'none' }}>
+            <div className="card card-flex-between" style={{ alignItems: 'center', cursor: 'pointer' }}>
+              <div style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.5rem', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon size={14} style={{ color }} />
+              </div>
+              <span className="text-wrap-anywhere" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-on-surface)', lineHeight: 1.3 }}>{label}</span>
             </div>
-            <span className="text-wrap-anywhere" style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-on-surface)', lineHeight: 1.3 }}>{label}</span>
-          </div>
-        </a>
-      ))}
+          </a>
+        );
+      })}
     </div>
   </div>
 );
 
-/* ── Dashboard ───────────────────────────────────────────────── */
+const normalizeDashboard = (role, payload) => {
+  const sections = payload?.sections || {};
+  const kpis = Array.isArray(payload?.kpis) ? payload.kpis : [];
+  if (!role) return null; // or loader
+  if (role === ROLES.VOLUNTEER) {
+    const base = fallbackDashboard.volunteer;
+    return {
+      hero: payload?.hero || base.hero,
+      kpis: base.kpis.map((item) => {
+        const match = kpis.find((kpi) => kpi.key === item.key);
+        return { ...item, value: match ? `${match.value}${match.unit || ''}` : item.value };
+      }),
+      myTasks: sections.myTasks ?? base.myTasks ?? [],
+      weeklyHoursChart: (sections.weeklyHoursChart || base.weeklyHoursChart).map((row) => ({ day: row.day, hours: row.hours ?? row.hrs ?? 0, tasks: row.tasks ?? 0 })),
+    };
+  }
+
+  if (role === ROLES.TEAM_LEAD) {
+    const base = fallbackDashboard.teamLead;
+    const values = Object.fromEntries(kpis.map((kpi) => [kpi.key || kpi.label, kpi]));
+    return {
+      hero: payload?.hero || base.hero,
+      kpis: [
+        { ...base.kpis[0], value: values.teamMembersCount?.value ?? base.kpis[0].value },
+        { ...base.kpis[1], value: values.teamHoursWeek?.value ? `${values.teamHoursWeek.value}h` : base.kpis[1].value },
+        { ...base.kpis[2], value: values.pendingTasksCount?.value ?? base.kpis[2].value },
+        { ...base.kpis[3], value: values.logsSubmittedCount?.value ?? base.kpis[3].value },
+      ],
+      teamLogsToday: sections.teamLogsToday || base.teamLogsToday,
+      committeeHoursWeekChart: (sections.committeeHoursWeekChart || base.committeeHoursWeekChart).map((row) => ({ day: row.day, hours: row.hours ?? row.hrs ?? 0 })),
+    };
+  }
+
+  if (role === ROLES.ADMIN) {
+    const base = fallbackDashboard.admin;
+    const values = Object.fromEntries(kpis.map((kpi) => [kpi.key || kpi.label, kpi]));
+    return {
+      hero: payload?.hero || base.hero,
+      kpis: [
+        { ...base.kpis[0], value: values.wingMembers?.value ?? base.kpis[0].value },
+        { ...base.kpis[1], value: values.committeesCount?.value ?? base.kpis[1].value },
+        { ...base.kpis[2], value: values.wingHoursWeek?.value ? `${values.wingHoursWeek.value}h` : base.kpis[2].value },
+        { ...base.kpis[3], value: values.activeEvents?.value ?? base.kpis[3].value },
+      ],
+      committeePerformanceRows: sections.committeePerformanceRows || base.committeePerformanceRows,
+    };
+  }
+
+  const base = fallbackDashboard.superAdmin;
+  const values = Object.fromEntries(kpis.map((kpi) => [kpi.key || kpi.label, kpi]));
+  return {
+    hero: payload?.hero || base.hero,
+    kpis: [
+      { ...base.kpis[0], value: values.totalMembers?.value ?? base.kpis[0].value },
+      { ...base.kpis[1], value: values.totalHoursWeek?.value ? `${values.totalHoursWeek.value}h` : base.kpis[1].value },
+      { ...base.kpis[2], value: values.activeWings?.value ?? base.kpis[2].value },
+      { ...base.kpis[3], value: values.globalEvents?.value ?? base.kpis[3].value },
+    ],
+    organizationWideHoursWeekChart: (sections.organizationWideHoursWeekChart || base.organizationWideHoursWeekChart).map((row) => ({ day: row.day, hours: row.hours ?? row.hrs ?? 0 })),
+    wingOverviewRows: sections.wingOverviewRows || base.wingOverviewRows,
+  };
+};
+
 const Dashboard = () => {
   const { user, role } = useAuthStore();
+  const [dashboardData, setDashboardData] = useState(() => normalizeDashboard(role, null));
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if ('Notification' in window) Notification.requestPermission();
   }, []);
 
-  const renderContent = () => {
+  useEffect(() => {
+    let mounted = true;
+    const loadDashboard = async () => {
+      try {
+        const roleView = role === ROLES.TEAM_LEAD ? 'team-lead' : role === ROLES.SUPER_ADMIN ? 'super-admin' : role?.toLowerCase() || 'auto';
+        const response = await api.get('/api/dashboard', { params: { roleView } });
+        const payload = unwrap(response);
+        if (mounted) {
+          setDashboardData(normalizeDashboard(role, payload));
+          setError(null);
+        }
+      } catch (dashboardError) {
+        if (mounted) {
+          setDashboardData(normalizeDashboard(role, null));
+          setError(getErrorMessage(dashboardError, 'Unable to load dashboard data.'));
+        }
+      }
+    };
+    loadDashboard();
+    return () => {
+      mounted = false;
+    };
+  }, [role]);
+
+  const content = useMemo(() => {
     switch (role) {
-      case ROLES.VOLUNTEER:   return <VolunteerDashboard />;
-      case ROLES.TEAM_LEAD:   return <TeamLeadDashboard />;
-      case ROLES.ADMIN:       return <AdminDashboard />;
-      case ROLES.SUPER_ADMIN: return <SuperAdminDashboard />;
-      default:                return <VolunteerDashboard />;
+      case ROLES.VOLUNTEER:
+        return <VolunteerDashboard data={dashboardData} />;
+      case ROLES.TEAM_LEAD:
+        return <TeamLeadDashboard data={dashboardData} />;
+      case ROLES.ADMIN:
+        return <AdminDashboard data={dashboardData} />;
+      case ROLES.SUPER_ADMIN:
+        return <SuperAdminDashboard data={dashboardData} />;
+      default:
+        return <VolunteerDashboard data={dashboardData} />;
     }
-  };
+  }, [dashboardData, role]);
 
   return (
     <>
       <TopBar title="Dashboard" />
       <div className="page-body">
-        <HeroBanner user={user} role={role} />
-        {renderContent()}
+        {error ? <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div> : null}
+        <HeroBanner user={user} role={role} subtitle={dashboardData.hero?.subtitle} />
+        {content}
       </div>
     </>
   );

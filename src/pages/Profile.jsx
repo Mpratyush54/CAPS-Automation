@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Camera, Edit2, Save, X, Clock, CheckCircle2, Calendar, Shield } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
+import { api, getErrorMessage, unwrap } from '../lib/api';
 
 const activityLog = [
   { action: 'Sprint Planning Review logged', time: '30m ago', type: 'log' },
@@ -12,7 +13,10 @@ const activityLog = [
 
 const Profile = () => {
   const { user, role, setUser } = useAuthStore();
+  const [serverActivity, setServerActivity] = useState(activityLog);
+  const [stats, setStats] = useState({ hours: '234', logs: '64' });
   const [editing, setEditing] = useState(false);
+  const [error, setError] = useState(null);
   const [form, setForm]       = useState({
     name:       user?.name || 'User',
     email:      user?.email || 'user@worklog.io',
@@ -24,8 +28,65 @@ const Profile = () => {
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleSave = () => {
-    setUser({ name: form.name, email: form.email });
+  useEffect(() => {
+    let mounted = true;
+    const loadProfile = async () => {
+      try {
+        const response = await api.get('/api/profile/me');
+        const payload = unwrap(response) || {};
+        if (!mounted) return;
+        const nextUser = payload.user || {};
+        setForm((current) => ({
+          ...current,
+          name: nextUser.name || current.name,
+          email: nextUser.email || current.email,
+          phone: nextUser.phone || current.phone,
+          wing: nextUser.wing || current.wing,
+          committee: nextUser.committee || current.committee,
+          joinDate: nextUser.joinDate?.slice?.(0, 10) || current.joinDate,
+          bio: nextUser.bio || current.bio,
+        }));
+        setStats((currentStats) => ({
+          hours: String(payload.summary?.hours ?? currentStats.hours ?? '234'),
+          logs: String(payload.summary?.logs ?? currentStats.logs ?? '64'),
+        }));
+        if (Array.isArray(payload.recentActivity) && payload.recentActivity.length) {
+          setServerActivity(payload.recentActivity.map((item) => ({
+            action: item.action || 'Activity',
+            time: item.timeLabel || item.time || '',
+            type: item.type || 'log',
+          })));
+        }
+        setUser({
+          ...(user || {}),
+          name: nextUser.name || user?.name,
+          email: nextUser.email || user?.email,
+          wing: nextUser.wing || user?.wing,
+          committee: nextUser.committee || user?.committee,
+        });
+      } catch {
+        // Keep seeded profile state as fallback.
+      }
+    };
+    loadProfile();
+    return () => {
+      mounted = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async () => {
+    setError(null);
+    try {
+      await api.patch('/api/profile/me', {
+        name: form.name,
+        phone: form.phone,
+        bio: form.bio,
+      });
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to update profile.'));
+      return;
+    }
+    setUser({ ...(user || {}), name: form.name, email: form.email, wing: form.wing, committee: form.committee });
     setEditing(false);
   };
 
@@ -35,6 +96,7 @@ const Profile = () => {
     <>
       <TopBar title="Profile" />
       <div className="page-body">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         <div className="profile-layout">
 
           {/* Left: Avatar + info card */}
@@ -66,7 +128,7 @@ const Profile = () => {
                 <Shield size={10} /> {role || 'Member'}
               </span>
               <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--color-surface-high)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                {[{ label: 'Hours', value: '234' }, { label: 'Logs', value: '64' }].map(({ label, value }) => (
+                {[{ label: 'Hours', value: stats.hours }, { label: 'Logs', value: stats.logs }].map(({ label, value }) => (
                   <div key={label} style={{ background: 'var(--color-surface-low)', borderRadius: '0.5rem', padding: '0.5rem' }}>
                     <p style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{value}</p>
                     <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>{label}</p>
@@ -79,7 +141,7 @@ const Profile = () => {
             <div className="card">
               <h3 style={{ margin: '0 0 0.875rem', fontSize: '0.875rem', fontWeight: 700 }}>Recent Activity</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
-                {activityLog.map((a, i) => (
+                {serverActivity.map((a, i) => (
                   <div key={i} style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
                     <div style={{ width: '1.75rem', height: '1.75rem', borderRadius: '0.375rem', background: 'var(--color-primary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {a.type === 'log' ? <Clock size={11} style={{ color: 'var(--color-primary)' }} /> : a.type === 'event' ? <Calendar size={11} style={{ color: 'var(--color-primary)' }} /> : <CheckCircle2 size={11} style={{ color: 'var(--color-primary)' }} />}

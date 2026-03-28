@@ -103,6 +103,9 @@ function App() {
         <Route path="/login" element={
           <Suspense fallback={null}><Login /></Suspense>
         } />
+        <Route path="/signup" element={
+          <Suspense fallback={null}><Login initialMode="signup" /></Suspense>
+        } />
 
         {/* Protected */}
         <Route path="/*" element={

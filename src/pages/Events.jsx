@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Calendar, Camera, Edit2, Eye, FileText, ImagePlus, Info, Lock, MapPin, PlusCircle, Save, Trash2, Users, X } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
 import { COMMITTEE_OPTIONS, WING_OPTIONS } from '../data/orgOptions';
+import { api, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
+import { normalizeEvent } from '../lib/adapters';
 
 const SEED_EVENTS = [
   { id: 1, title: 'Annual Volunteer Drive', date: '2026-03-28', time: '09:00', location: 'City Hall, Bangalore', wing: 'Community Wing', committee: 'Events Comm.', attendees: 120, status: 'Completed', assignedTo: ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'], description: 'Yearly volunteer recruitment and orientation event open to all teams.', report: { status: 'Ready', owner: 'Morgan Chen', lastUpdated: '2026-03-29', summary: 'Drive completed with strong turnout and onboarding conversion.' }, photos: [{ id: 11, name: 'registration-desk.jpg', uploadedBy: 'Riya Gupta', status: 'Synced', driveFolder: 'drive://events/annual-volunteer-drive', uploadedAt: '2026-03-28 11:15' }, { id: 12, name: 'orientation-stage.jpg', uploadedBy: 'Rahul Sharma', status: 'Pending Sync', driveFolder: 'drive://events/annual-volunteer-drive', uploadedAt: '2026-03-28 12:02' }] },
@@ -25,6 +27,19 @@ const Modal = ({ title, onClose, children, maxWidth = '760px' }) => (
   </div>
 );
 
+const SelectField = ({ label, value, locked, options, onChange }) => (
+  <div>
+    <label className="input-label">{label}{locked ? <span style={{ color: 'var(--color-outline)', fontWeight: 400, fontSize: '0.75rem' }}> (assigned)</span> : null}</label>
+    <div style={{ position: 'relative' }}>
+      <select className="input-field" value={value} onChange={onChange} disabled={locked} style={{ cursor: locked ? 'not-allowed' : 'pointer', background: locked ? 'var(--color-surface-low)' : undefined }}>
+        <option value="">Select {label.toLowerCase()}</option>
+        {options.map((option) => <option key={option}>{option}</option>)}
+      </select>
+      {locked ? <Lock size={12} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-outline)', pointerEvents: 'none' }} /> : null}
+    </div>
+  </div>
+);
+
 const EventFormModal = ({ initial, role, currentUser, onClose, onSave }) => {
   const lockWing = role === ROLES.VOLUNTEER || role === ROLES.ADMIN;
   const lockCommittee = role === ROLES.VOLUNTEER;
@@ -36,19 +51,6 @@ const EventFormModal = ({ initial, role, currentUser, onClose, onSave }) => {
     onSave({ ...(initial || {}), id: initial?.id || Date.now(), ...form, attendees: Number(form.attendees) || 0, assignedTo: initial?.assignedTo || ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'], report: initial?.report || { status: 'Not Started', owner: currentUser?.name || 'Team Lead', lastUpdated: '-', summary: '' }, photos: initial?.photos || [] });
     onClose();
   };
-
-  const SelectField = ({ label, value, locked, options, onChange }) => (
-    <div>
-      <label className="input-label">{label}{locked ? <span style={{ color: 'var(--color-outline)', fontWeight: 400, fontSize: '0.75rem' }}> (assigned)</span> : null}</label>
-      <div style={{ position: 'relative' }}>
-        <select className="input-field" value={value} onChange={onChange} disabled={locked} style={{ cursor: locked ? 'not-allowed' : 'pointer', background: locked ? 'var(--color-surface-low)' : undefined }}>
-          <option value="">Select {label.toLowerCase()}</option>
-          {options.map((option) => <option key={option}>{option}</option>)}
-        </select>
-        {locked ? <Lock size={12} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-outline)', pointerEvents: 'none' }} /> : null}
-      </div>
-    </div>
-  );
 
   return (
     <Modal title={initial ? `Edit: ${initial.title}` : 'Create New Event'} onClose={onClose} maxWidth="620px">
@@ -72,13 +74,11 @@ const EventFormModal = ({ initial, role, currentUser, onClose, onSave }) => {
   );
 };
 
-const EventWorkspaceModal = ({ event, role, currentUser, onClose, onSave }) => {
+const EventWorkspaceModal = ({ event, role, onClose, onSave, onUpload }) => {
   const canEditReport = can(role, 'manageCommitteeEvents');
   const [summary, setSummary] = useState(event.report?.summary || '');
 
   const saveReport = () => onSave({ ...event, report: { ...event.report, status: summary ? 'Ready' : event.report.status, summary, lastUpdated: '2026-03-29' } });
-  const uploadMockPhoto = () => onSave({ ...event, photos: [{ id: Date.now(), name: `upload-${event.photos.length + 1}.jpg`, uploadedBy: currentUser?.name || 'Volunteer', status: 'Pending Sync', driveFolder: `drive://events/${event.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, uploadedAt: '2026-03-29 14:10' }, ...event.photos] });
-
   return (
     <Modal title={`Event Workspace: ${event.title}`} onClose={onClose}>
       <div style={{ display: 'grid', gap: '1rem' }}>
@@ -91,7 +91,7 @@ const EventWorkspaceModal = ({ event, role, currentUser, onClose, onSave }) => {
           </div>
 
           <div className="card" style={{ padding: '1rem', margin: 0 }}>
-            <div className="card-flex-between" style={{ marginBottom: '0.75rem' }}><h4 style={{ margin: 0, fontSize: '0.95rem' }}>Photo Upload Tracking</h4><button className="btn-primary" onClick={uploadMockPhoto}><ImagePlus size={14} /> Upload</button></div>
+            <div className="card-flex-between" style={{ marginBottom: '0.75rem' }}><h4 style={{ margin: 0, fontSize: '0.95rem' }}>Photo Upload Tracking</h4><button className="btn-primary" onClick={onUpload}><ImagePlus size={14} /> Upload</button></div>
             <div style={{ padding: '0.75rem', borderRadius: '0.625rem', background: 'var(--color-surface-low)', marginBottom: '0.75rem', fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>In production the backend should store file status, uploader id, event id, Google Drive folder id, and retry state for each upload.</div>
             <div style={{ display: 'grid', gap: '0.625rem', maxHeight: '260px', overflow: 'auto' }}>
               {event.photos.length === 0 ? <div style={{ fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>No uploads yet.</div> : event.photos.map((photo) => (
@@ -158,17 +158,137 @@ const Events = () => {
   const [editModal, setEdit] = useState(null);
   const [workspaceModal, setWorkspace] = useState(null);
   const [deleteModal, setDelete] = useState(null);
+  const [error, setError] = useState(null);
+  const uploadEventRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadEvents = async () => {
+      try {
+        const response = await api.get('/api/events');
+        const payload = unwrap(response);
+        const rows = payload?.rows || payload?.items || payload || [];
+        if (mounted && Array.isArray(rows) && rows.length) {
+          setEvents(rows.map(normalizeEvent));
+        }
+      } catch {
+        // Keep seed data as fallback.
+      }
+    };
+    loadEvents();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const viewable = role === ROLES.VOLUNTEER ? events.filter((event) => event.assignedTo?.includes(role)) : events;
   const filtered = viewable.filter((event) => filter === 'All' || event.status === filter);
-  const saveEvent = (next) => setEvents((current) => current.some((event) => event.id === next.id) ? current.map((event) => event.id === next.id ? next : event) : [next, ...current]);
-  const deleteEvent = () => setEvents((current) => current.filter((event) => event.id !== deleteModal.id));
+  const saveEvent = async (next) => {
+    setError(null);
+    const payload = {
+      title: next.title,
+      description: next.description,
+      eventDate: formatDateTime(next.date, next.time),
+      startTime: next.time,
+      location: next.location,
+      wingId: next.wing || undefined,
+      committeeId: next.committee || undefined,
+      attendeeCount: Number(next.attendees || 0),
+      status: next.status.toLowerCase(),
+    };
+    try {
+      const response = next.id && events.some((event) => event.id === next.id)
+        ? await api.patch(`/api/events/${next.id}`, payload)
+        : await api.post('/api/events', payload);
+      const saved = normalizeEvent(unwrap(response) || next);
+      setEvents((current) => current.some((event) => event.id === saved.id) ? current.map((event) => event.id === saved.id ? saved : event) : [saved, ...current]);
+      return;
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to save event.'));
+    }
+    setEvents((current) => current.some((event) => event.id === next.id) ? current.map((event) => event.id === next.id ? next : event) : [next, ...current]);
+  };
+  const deleteEvent = async () => {
+    setError(null);
+    try {
+      await api.delete(`/api/events/${deleteModal.id}`);
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Unable to delete event.'));
+    }
+    setEvents((current) => current.filter((event) => event.id !== deleteModal.id));
+  };
   const pageTitle = role === ROLES.VOLUNTEER ? 'My Events' : role === ROLES.TEAM_LEAD ? 'Team Events' : role === ROLES.ADMIN ? 'Label 1 Events' : 'All Events';
+
+  const openWorkspace = async (event) => {
+    setError(null);
+    try {
+      const [eventRes, photoRes] = await Promise.all([
+        api.get(`/api/events/${event.id}`),
+        api.get(`/api/events/${event.id}/photos`),
+      ]);
+      const detail = normalizeEvent(unwrap(eventRes) || event);
+      const photosPayload = unwrap(photoRes);
+      detail.photos = (photosPayload?.uploads || photosPayload?.items || photosPayload || []).map((photo) => ({
+        id: photo._id || photo.id,
+        name: photo.fileName || photo.name,
+        uploadedBy: photo.uploadedByName || photo.uploadedBy || 'Unknown',
+        status: photo.status === 'uploaded' ? 'Synced' : photo.status === 'failed' ? 'Failed' : 'Pending Sync',
+        driveFolder: photo.folderUrl || photo.folderId || '',
+        uploadedAt: photo.createdAt || photo.uploadedAt || '',
+      }));
+      setWorkspace(detail);
+    } catch {
+      setWorkspace(event);
+    }
+  };
+
+  const saveWorkspace = async (next) => {
+    setError(null);
+    try {
+      await api.put(`/api/events/${next.id}/report`, {
+        summary: next.report?.summary || '',
+        status: (next.report?.status || 'Draft').toLowerCase().replace(/\s+/g, '_'),
+      });
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to save event report.'));
+    }
+    saveEvent(next);
+    setWorkspace(next);
+  };
+
+  const queuePhotoUpload = async (event, files) => {
+    if (!files?.length) return;
+    setError(null);
+    try {
+      await api.post(`/api/events/${event.id}/photos/upload-url`, {
+        files: Array.from(files).map((file) => ({
+          fileName: file.name,
+          mimeType: file.type,
+          sizeBytes: file.size,
+        })),
+      });
+      const uploaded = Array.from(files).map((file, index) => ({
+        id: `temp-${Date.now()}-${index}`,
+        name: file.name,
+        uploadedBy: user?.name || 'Volunteer',
+        status: 'Pending Sync',
+        driveFolder: 'Queued for backend sync',
+        uploadedAt: new Date().toLocaleString(),
+      }));
+      const next = { ...event, photos: [...uploaded, ...(event.photos || [])] };
+      setEvents((current) => current.map((item) => item.id === event.id ? next : item));
+      setWorkspace(next);
+    } catch (uploadError) {
+      setError(getErrorMessage(uploadError, 'Unable to queue photo upload.'));
+    }
+  };
 
   return (
     <>
       <TopBar title={pageTitle} />
       <div className="page-body">
+        <input ref={uploadEventRef} type="file" multiple accept="image/*" style={{ display: 'none' }} onChange={(e) => workspaceModal && queuePhotoUpload(workspaceModal, e.target.files)} />
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         <div className="card" style={{ marginBottom: '1rem', background: 'var(--color-surface-low)' }}>
           <div className="card-flex-between" style={{ alignItems: 'flex-start', gap: '1rem' }}>
             <div>
@@ -189,13 +309,13 @@ const Events = () => {
 
         {role === ROLES.VOLUNTEER && <div className="card-meta-row" style={{ padding: '0.75rem 1rem', background: 'var(--color-primary-fixed)', borderRadius: '0.625rem', fontSize: '0.8125rem', color: 'var(--color-primary)', fontWeight: 500, marginBottom: '1rem' }}><Info size={14} style={{ flexShrink: 0 }} /> Volunteers can upload event photos here. Team leads and admins close the event report after media sync and summary review are complete.</div>}
 
-        <div className="events-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '1rem' }}>{filtered.map((event) => <EventCard key={event.id} event={event} role={role} onWorkspace={setWorkspace} onEdit={setEdit} onDelete={setDelete} />)}</div>
+        <div className="events-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '1rem' }}>{filtered.map((event) => <EventCard key={event.id} event={event} role={role} onWorkspace={openWorkspace} onEdit={setEdit} onDelete={setDelete} />)}</div>
 
         {filtered.length === 0 && <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-on-surface-variant)' }}><Calendar size={40} style={{ marginBottom: '1rem', opacity: 0.4 }} /><p>No events found.</p></div>}
 
         {createModal && <EventFormModal role={role} currentUser={user} onClose={() => setCreate(false)} onSave={saveEvent} />}
         {editModal && <EventFormModal initial={editModal} role={role} currentUser={user} onClose={() => setEdit(null)} onSave={saveEvent} />}
-        {workspaceModal && <EventWorkspaceModal event={workspaceModal} role={role} currentUser={user} onClose={() => setWorkspace(null)} onSave={(next) => { saveEvent(next); setWorkspace(next); }} />}
+        {workspaceModal && <EventWorkspaceModal event={workspaceModal} role={role} currentUser={user} onClose={() => setWorkspace(null)} onSave={saveWorkspace} onUpload={() => uploadEventRef.current?.click()} />}
         {deleteModal && <ConfirmDelete event={deleteModal} onConfirm={deleteEvent} onClose={() => setDelete(null)} />}
       </div>
     </>

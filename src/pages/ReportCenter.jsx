@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CalendarRange, CheckCircle2, Download, FileClock, FileText, Filter, FolderSync } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
+import { api, getErrorMessage, unwrap } from '../lib/api';
+import { normalizeMom, normalizeReportRow } from '../lib/adapters';
 
 const REPORT_PERIODS = ['Weekly', 'Monthly', '3 Months', '6 Months', 'Yearly'];
 
@@ -38,6 +40,8 @@ const ReportCenter = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('Weekly');
   const [selectedTeam, setSelectedTeam] = useState(user?.committee || 'All Teams');
   const [reportRows, setReportRows] = useState(TEAM_REPORTS);
+  const [moms, setMoms] = useState(MOMS);
+  const [error, setError] = useState(null);
 
   const canSubmitWeekly = can(role, 'viewTeamReports');
   const canViewAllTeams = role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN;
@@ -47,10 +51,47 @@ const ReportCenter = () => {
     const teamMatch = canViewAllTeams ? selectedTeam === 'All Teams' || row.team === selectedTeam : row.team === (user?.committee || 'Dev Board');
     return periodMatch && teamMatch;
   }), [canViewAllTeams, reportRows, selectedPeriod, selectedTeam, user?.committee]);
-  const visibleMoms = MOMS.filter((row) => canViewAllTeams || row.team === (user?.committee || 'Dev Board'));
+  const visibleMoms = moms.filter((row) => canViewAllTeams || row.team === (user?.committee || 'Dev Board'));
 
-  const submitWeeklyReport = () => {
+  useEffect(() => {
+    let mounted = true;
+    const loadData = async () => {
+      try {
+        const [reportsResponse, momsResponse] = await Promise.all([
+          api.get('/api/reports', { params: { period: selectedPeriod, teamId: canViewAllTeams ? undefined : user?.committee } }),
+          api.get('/api/reports/moms'),
+        ]);
+        if (!mounted) return;
+        const reportPayload = unwrap(reportsResponse);
+        const momPayload = unwrap(momsResponse);
+        const nextReports = (reportPayload?.rows || reportPayload?.items || []).map(normalizeReportRow);
+        const nextMoms = (momPayload?.rows || momPayload?.items || []).map(normalizeMom);
+        if (nextReports.length) setReportRows(nextReports);
+        if (nextMoms.length) setMoms(nextMoms);
+      } catch {
+        // Keep seed data as fallback.
+      }
+    };
+    loadData();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedPeriod, canViewAllTeams, user?.committee]);
+
+  const submitWeeklyReport = async () => {
+    setError(null);
     const next = { id: Date.now(), team: user?.committee || 'Dev Board', labelOne: user?.wing || 'Tech Wing', period: 'Weekly', periodKey: '2026-W13', title: 'Weekly execution summary', status: 'Submitted', owner: user?.name || 'Team Lead', source: 'Manual', generatedFrom: '-', hours: 54 };
+    try {
+      await api.post('/api/reports/weekly', {
+        weekKey: next.periodKey,
+        title: next.title,
+        hours: next.hours,
+        status: 'submitted',
+      });
+    } catch (submitError) {
+      setError(getErrorMessage(submitError, 'Unable to submit weekly report.'));
+      return;
+    }
     setReportRows((current) => [next, ...current.filter((row) => !(row.period === 'Weekly' && row.periodKey === next.periodKey && row.team === next.team))]);
   };
 
@@ -58,6 +99,7 @@ const ReportCenter = () => {
     <>
       <TopBar title="Reports" />
       <div className="page-body">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         <div className="card" style={{ background: 'var(--gradient-primary)', color: '#fff', marginBottom: '1rem' }}>
           <div className="card-flex-between" style={{ alignItems: 'flex-start', gap: '1rem' }}>
             <div>
@@ -135,9 +177,10 @@ const ReportCenter = () => {
         </div>
 
         <div className="grid-cols-4">
-          {[{ label: 'Weekly streams', value: `${TEAM_REPORTS.filter((row) => row.period === 'Weekly').length}`, icon: FileClock }, { label: 'Auto-generated summaries', value: `${TEAM_REPORTS.filter((row) => row.source === 'Auto').length}`, icon: FolderSync }, { label: 'Published MOMs', value: `${MOMS.filter((row) => row.status === 'Published').length}`, icon: CheckCircle2 }, { label: 'Annual reports', value: `${TEAM_REPORTS.filter((row) => row.period === 'Yearly').length}`, icon: CalendarRange }].map(({ label, value, icon: Icon }) => (
-            <div key={label} className="card"><div className="card-flex-between"><span className="card-title" style={{ margin: 0 }}>{label}</span><Icon size={14} style={{ color: 'var(--color-primary)' }} /></div><p style={{ margin: '0.45rem 0 0', fontSize: '1.55rem', fontWeight: 700 }}>{value}</p></div>
-          ))}
+          {[{ label: 'Weekly streams', value: `${reportRows.filter((row) => row.period === 'Weekly').length}`, icon: FileClock }, { label: 'Auto-generated summaries', value: `${reportRows.filter((row) => row.source === 'Auto').length}`, icon: FolderSync }, { label: 'Published MOMs', value: `${moms.filter((row) => row.status === 'Published').length}`, icon: CheckCircle2 }, { label: 'Annual reports', value: `${reportRows.filter((row) => row.period === 'Yearly').length}`, icon: CalendarRange }].map(({ label, value, icon }) => {
+            const Icon = icon;
+            return <div key={label} className="card"><div className="card-flex-between"><span className="card-title" style={{ margin: 0 }}>{label}</span><Icon size={14} style={{ color: 'var(--color-primary)' }} /></div><p style={{ margin: '0.45rem 0 0', fontSize: '1.55rem', fontWeight: 700 }}>{value}</p></div>;
+          })}
         </div>
       </div>
     </>

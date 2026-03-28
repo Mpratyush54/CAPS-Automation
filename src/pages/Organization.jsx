@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PlusCircle, ChevronRight, Users, Building2, Edit2, Trash2, Search, Shield, Info, X, Save } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
+import { api, getErrorMessage, unwrap } from '../lib/api';
+import { normalizeTeam } from '../lib/adapters';
 
 const TEAM_DIRECTORY = [
   {
@@ -135,16 +137,89 @@ const Organization = () => {
   const [teamModal, setTeamModal] = useState(null);
   const [memberModal, setMemberModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
+  const [error, setError] = useState(null);
 
   const selectedTeam = teams.find((team) => team.id === selectedId) || teams[0];
   const filteredTeams = teams.filter((team) => `${team.labelOne} ${team.labelTwo}`.toLowerCase().includes(search.toLowerCase()));
   const canManageTeams = can(role, 'manageCommittees');
   const canManageDirectory = can(role, 'manageWings');
 
-  const saveTeam = ({ id, ...data }) => setTeams((current) => current.some((team) => team.id === id) ? current.map((team) => team.id === id ? { ...team, ...data } : team) : [...current, { id, ...data, members: [] }]);
-  const saveMember = ({ id, ...data }) => setTeams((current) => current.map((team) => team.id === memberModal.team.id ? { ...team, members: memberModal.member ? team.members.map((member) => member.id === id ? { id, ...data } : member) : [...team.members, { id, ...data }] } : team));
-  const deleteMember = () => setTeams((current) => current.map((team) => team.id === deleteModal.team.id ? { ...team, members: team.members.filter((member) => member.id !== deleteModal.member.id) } : team));
-  const deleteTeam = () => setTeams((current) => current.filter((team) => team.id !== deleteModal.team.id));
+  useEffect(() => {
+    let mounted = true;
+    const loadTeams = async () => {
+      try {
+        const response = await api.get('/api/organization/teams', {
+          params: { search: search || undefined, page: 1, pageSize: 50 },
+        });
+        const payload = unwrap(response);
+        const rows = payload?.rows || payload?.items || [];
+        if (mounted && rows.length) {
+          const nextTeams = rows.map(normalizeTeam);
+          setTeams(nextTeams);
+          if (!nextTeams.some((team) => team.id === selectedId)) setSelectedId(nextTeams[0]?.id);
+        }
+      } catch {
+        // Keep seed data as fallback.
+      }
+    };
+    loadTeams();
+    return () => {
+      mounted = false;
+    };
+  }, [search, selectedId]);
+
+  const saveTeam = async ({ id, ...data }) => {
+    setError(null);
+    try {
+      const endpoint = teamModal?.team ? `/api/organization/teams/${id}` : '/api/organization/teams';
+      const method = teamModal?.team ? 'patch' : 'post';
+      const response = await api[method](endpoint, {
+        labelOne: data.labelOne,
+        labelTwo: data.labelTwo,
+        focus: data.focus,
+        leadUserId: null,
+      });
+      const saved = normalizeTeam(unwrap(response) || { id, ...data, members: data.members || [] });
+      setTeams((current) => current.some((team) => team.id === saved.id) ? current.map((team) => team.id === saved.id ? { ...team, ...saved } : team) : [...current, saved]);
+      setSelectedId(saved.id);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to save team.'));
+    }
+  };
+
+  const saveMember = async ({ id, ...data }) => {
+    setError(null);
+    try {
+      const endpoint = memberModal.member
+        ? `/api/organization/teams/${memberModal.team.id}/members/${id}`
+        : `/api/organization/teams/${memberModal.team.id}/members`;
+      const method = memberModal.member ? 'patch' : 'post';
+      await api[method](endpoint, data);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to save member.'));
+    }
+    setTeams((current) => current.map((team) => team.id === memberModal.team.id ? { ...team, members: memberModal.member ? team.members.map((member) => member.id === id ? { id, ...data } : member) : [...team.members, { id, ...data }] } : team));
+  };
+
+  const deleteMember = async () => {
+    setError(null);
+    try {
+      await api.delete(`/api/organization/teams/${deleteModal.team.id}/members/${deleteModal.member.id}`);
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Unable to delete member.'));
+    }
+    setTeams((current) => current.map((team) => team.id === deleteModal.team.id ? { ...team, members: team.members.filter((member) => member.id !== deleteModal.member.id) } : team));
+  };
+
+  const deleteTeam = async () => {
+    setError(null);
+    try {
+      await api.delete(`/api/organization/teams/${deleteModal.team.id}`);
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Unable to delete team.'));
+    }
+    setTeams((current) => current.filter((team) => team.id !== deleteModal.team.id));
+  };
 
   const pageTitles = {
     [ROLES.TEAM_LEAD]: 'My Team Labels',
@@ -156,6 +231,7 @@ const Organization = () => {
     <>
       <TopBar title={pageTitles[role] || 'Organization'} />
       <div className="page-body">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         <div className="card" style={{ marginBottom: '1rem', background: 'var(--color-surface-low)' }}>
           <div className="card-meta-row" style={{ fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>
             <Info size={14} style={{ flexShrink: 0 }} />

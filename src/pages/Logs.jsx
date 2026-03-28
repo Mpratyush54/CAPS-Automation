@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   PlusCircle, Search, Edit2, Trash2, Clock, CheckCircle,
   Eye, X, Save, XCircle, AlertCircle, Info, Send,
@@ -7,6 +7,8 @@ import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
 import { WING_OPTIONS, COMMITTEE_OPTIONS } from '../data/orgOptions';
+import { api, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
+import { normalizeLog } from '../lib/adapters';
 
 const STATUS_META = {
   'Draft': { label: 'Draft', badge: 'badge-neutral', desc: 'Not yet submitted' },
@@ -208,6 +210,7 @@ const Logs = () => {
   const { role, user } = useAuthStore();
   const [myLogs, setMyLogs] = useState(SEED_MY);
   const [teamLogs, setTeamLogs] = useState(SEED_TEAM);
+  const [remoteLogs, setRemoteLogs] = useState([]);
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [addModal, setAdd] = useState(false);
@@ -216,8 +219,35 @@ const Logs = () => {
   const [deleteModal, setDel] = useState(null);
   const [approveModal, setApprove] = useState(null);
   const [rejectModal, setReject] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadLogs = async () => {
+      try {
+        const params = {};
+        if (filter !== 'All') params.status = filter.toLowerCase().replace(/\s+/g, '_');
+        const response = await api.get('/api/logs', { params });
+        const payload = unwrap(response);
+        const rows = payload?.rows || payload?.items || [];
+        if (mounted && rows.length) {
+          setRemoteLogs(rows.map((row) => normalizeLog(row, user?.id)));
+        }
+      } catch {
+        // Keep local seed data as fallback.
+      }
+    };
+    loadLogs();
+    return () => {
+      mounted = false;
+    };
+  }, [filter, user?.id]);
 
   const baseData = (() => {
+    if (remoteLogs.length) return remoteLogs.filter((log) => {
+      const matchS = !search || log.title.toLowerCase().includes(search.toLowerCase()) || log.submitter.toLowerCase().includes(search.toLowerCase());
+      return matchS;
+    });
     if (role === ROLES.VOLUNTEER) return myLogs;
     if (role === ROLES.TEAM_LEAD) return [...teamLogs, ...myLogs];
     return [...myLogs, ...teamLogs, ...SEED_OTHER];
@@ -231,10 +261,67 @@ const Logs = () => {
     return matchF && matchS;
   });
 
-  const addLog = (data) => setMyLogs((ls) => [{ id: Date.now(), submitter: 'Me', isOwn: true, tlComment: null, ...data }, ...ls]);
-  const saveLog = (data) => setMyLogs((ls) => ls.map((l) => l.id === data.id ? { ...data, tlComment: data.status === 'Pending Review' ? null : data.tlComment } : l));
-  const deleteLog = () => setMyLogs((ls) => ls.filter((l) => l.id !== deleteModal.id));
-  const reviewAction = (id, newStatus, comment) => {
+  const toApiStatus = (value) => value.toLowerCase().replace(/\s+/g, '_').replace('completed', 'approved');
+
+  const addLog = async (data) => {
+    setError(null);
+    const payload = {
+      title: data.title,
+      description: data.notes || '',
+      workDate: formatDateTime(data.date),
+      durationMinutes: Number(data.hours || 0) * 60 + Number(data.minutes || 0),
+      tag: data.tag || '',
+      status: toApiStatus(data.status || 'Draft'),
+      wingId: data.wing || undefined,
+      committeeId: data.committee || undefined,
+    };
+    try {
+      const response = await api.post('/api/logs', payload);
+      const saved = normalizeLog(unwrap(response) || { id: Date.now(), ...payload }, user?.id);
+      setRemoteLogs((current) => [saved, ...current]);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to create log.'));
+    }
+    setMyLogs((ls) => [{ id: Date.now(), submitter: 'Me', isOwn: true, tlComment: null, ...data }, ...ls]);
+  };
+
+  const saveLog = async (data) => {
+    setError(null);
+    try {
+      await api.patch(`/api/logs/${data.id}`, {
+        title: data.title,
+        description: data.notes || '',
+        workDate: formatDateTime(data.date),
+        durationMinutes: Number(data.hours || 0) * 60 + Number(data.minutes || 0),
+        status: toApiStatus(data.status || 'Draft'),
+      });
+      setRemoteLogs((current) => current.map((log) => log.id === data.id ? { ...log, ...data } : log));
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Unable to update log.'));
+    }
+    setMyLogs((ls) => ls.map((l) => l.id === data.id ? { ...data, tlComment: data.status === 'Pending Review' ? null : data.tlComment } : l));
+  };
+
+  const deleteLog = async () => {
+    setError(null);
+    try {
+      await api.delete(`/api/logs/${deleteModal.id}`);
+      setRemoteLogs((current) => current.filter((log) => log.id !== deleteModal.id));
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, 'Unable to delete log.'));
+    }
+    setMyLogs((ls) => ls.filter((l) => l.id !== deleteModal.id));
+  };
+
+  const reviewAction = async (id, newStatus, comment) => {
+    setError(null);
+    try {
+      const endpoint = newStatus === 'Completed' ? 'approve' : 'reject';
+      await api.post(`/api/logs/${id}/${endpoint}`, { comment });
+      setRemoteLogs((current) => current.map((log) => log.id === id ? { ...log, status: newStatus, tlComment: comment } : log));
+    } catch (reviewError) {
+      setError(getErrorMessage(reviewError, 'Unable to update review status.'));
+    }
     const updateList = (list) => list.map((l) => l.id === id ? { ...l, status: newStatus, tlComment: comment } : l);
     setTeamLogs(updateList);
     setMyLogs(updateList);
@@ -247,6 +334,7 @@ const Logs = () => {
     <>
       <TopBar title={scopeLabel} />
       <div className="page-body">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
         {role === ROLES.VOLUNTEER && needsRevisionLogs.length > 0 && (
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', padding: '0.875rem 1rem', background: 'var(--color-error-container)', borderRadius: '0.625rem', marginBottom: '1rem', borderLeft: '4px solid var(--color-error)' }}>
             <AlertCircle size={18} style={{ color: 'var(--color-error)', flexShrink: 0, marginTop: '1px' }} />
