@@ -51,6 +51,7 @@ router.get('/me', async (req, res) => {
             phone: user.profile?.phone || null,
             wing: user.primaryWingId || null,
             committee: user.primaryCommitteeId || null,
+            teamId: user.teamId || null,
             joinDate: user.profile?.joinDate || null,
             bio: user.profile?.bio || null,
             avatarUrl: user.profile?.avatarUrl || null,

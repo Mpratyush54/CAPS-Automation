@@ -12,10 +12,17 @@ const { moderateContent } = require('../middleware/moderation');
 
 const router = express.Router();
 
+const ROLES = {
+    VOLUNTEER: 'Volunteer',
+    TEAM_LEAD: 'Team Lead',
+    ADMIN: 'Admin',
+    SUPER_ADMIN: 'Super Admin',
+};
+
 // ──────────────── Helper ────────────────
 function generateToken(user) {
     return jwt.sign(
-        { id: user._id.toString(), role: user.role },
+        { id: (user._id || '').toString(), role: user.role || ROLES.VOLUNTEER },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
@@ -23,7 +30,7 @@ function generateToken(user) {
 
 function generateRefreshToken(user) {
     return jwt.sign(
-        { id: user._id.toString(), role: user.role, type: 'refresh' },
+        { id: (user._id || '').toString(), role: user.role || ROLES.VOLUNTEER, type: 'refresh' },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
     );
@@ -50,44 +57,11 @@ function generatePassword(length = 10) {
  *   post:
  *     summary: Register a new user
  *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - name
- *               - email
- *               - password
- *             properties:
- *               name:
- *                 type: string
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *               role:
- *                 type: string
- *               profession:
- *                 type: string
- *               expertise:
- *                 type: string
- *     responses:
- *       201:
- *         $ref: '#/components/responses/Created'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       403:
- *         $ref: '#/components/responses/Forbidden'
- *       409:
- *         $ref: '#/components/responses/Conflict'
  */
 router.post('/signup', moderateContent(['name', 'profession', 'expertise']), async (req, res) => {
     try {
         const { name, email, password, role, avatar, profession, expertise } = req.body;
 
-        // 1. Fetch launch configuration early
         const CACHE_KEY = 'config:launch_status';
         let status = await cacheGet(CACHE_KEY);
         if (!status) {
@@ -115,41 +89,20 @@ router.post('/signup', moderateContent(['name', 'profession', 'expertise']), asy
             return res.status(400).json({ error: 'Invalid email address.' });
         }
 
-        if (password.length < 6) {
-            return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-        }
-
-        if (name.length < 2 || name.length > 50) {
-            return res.status(400).json({ error: 'Name must be between 2 and 50 characters.' });
-        }
-
         const db = getDB();
-
-        // Check if email already exists
         const existing = await db.collection('users').findOne({ email: email.toLowerCase() });
         if (existing) {
             return res.status(409).json({ error: 'Email already registered.' });
         }
 
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 12);
-
-        // Determine defaults
-        const userRole = role === 'specialist' ? 'specialist' : 'student';
-        const defaultAvatar = userRole === 'specialist' ? '👨‍⚕️' : '👨‍🎓';
-
-        // Create user
         const newUser = {
             name: name.trim(),
             email: email.toLowerCase().trim(),
             password: hashedPassword,
-            role: userRole,
-            verified: userRole === 'specialist' ? false : true,
-            avatar: avatar || defaultAvatar,
-            upvotedAnswers: [],
-            warnings: [],
-            banned: false,
-            // banReason: null, // Omit to avoid validation complexity if any
+            role: role || ROLES.VOLUNTEER,
+            verified: true,
+            avatar: avatar || '👤',
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -169,44 +122,11 @@ router.post('/signup', moderateContent(['name', 'profession', 'expertise']), asy
         });
     } catch (err) {
         console.error('Signup error:', err);
-        if (err.code === 121) {
-            console.error('Validation failure details:', JSON.stringify(err.errInfo, null, 2));
-        }
         res.status(500).json({ error: 'Failed to create account.' });
     }
 });
 
 // ──────────────── POST /api/auth/login ────────────────
-/**
- * @swagger
- * /api/auth/login:
- *   post:
- *     summary: Log in to an existing account
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- *       403:
- *         $ref: '#/components/responses/Forbidden'
- */
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -222,8 +142,13 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        if (user.banned || !user.verified) {
-            return res.status(403).json({ error: 'Your account has been suspended or is not verified.' });
+        if (user.banned) {
+            return res.status(403).json({ error: 'Your account has been suspended.' });
+        }
+        
+        // Auto-verify users if they aren't already (compat with old system)
+        if (user.verified === false) {
+            await db.collection('users').updateOne({ _id: user._id }, { $set: { verified: true } });
         }
 
         const isMatch = await bcrypt.compare(password, user.password);
@@ -231,7 +156,6 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        // Update last login
         await db.collection('users').updateOne(
             { _id: user._id },
             { $set: { lastLogin: new Date() } }
@@ -240,7 +164,6 @@ router.post('/login', async (req, res) => {
         const token = generateToken(user);
         const refreshToken = generateRefreshToken(user);
 
-        // Cache user session
         await cacheSet(`user:${user._id}`, sanitizeUser(user), 300);
 
         res.json({
@@ -255,31 +178,6 @@ router.post('/login', async (req, res) => {
     }
 });
 
-/**
- * @swagger
- * /api/auth/refresh:
- *   post:
- *     summary: Refresh an access token using a refresh token
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - refreshToken
- *             properties:
- *               refreshToken:
- *                 type: string
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
 router.post('/refresh', async (req, res) => {
     try {
         const { refreshToken } = req.body;
@@ -312,211 +210,69 @@ router.post('/refresh', async (req, res) => {
     }
 });
 
-// ──────────────── GET /api/auth/me ────────────────
-/**
- * @swagger
- * /api/auth/me:
- *   get:
- *     summary: Get the currently authenticated user
- *     tags: [Auth]
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
 router.get('/me', authenticate, (req, res) => {
     res.json({ user: req.user });
 });
 
-// ──────────────── POST /api/auth/change-password ────────────────
-/**
- * @swagger
- * /api/auth/change-password:
- *   post:
- *     summary: Change the current user's password
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - currentPassword
- *               - newPassword
- *             properties:
- *               currentPassword:
- *                 type: string
- *               newPassword:
- *                 type: string
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
 router.post('/change-password', authenticate, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
-
         if (!currentPassword || !newPassword) {
             return res.status(400).json({ error: 'Current and new password are required.' });
         }
-
         if (newPassword.length < 6) {
             return res.status(400).json({ error: 'New password must be at least 6 characters.' });
         }
-
         const db = getDB();
         const user = await db.collection('users').findOne({ _id: req.user._id });
-
         const isMatch = await bcrypt.compare(currentPassword, user.password);
         if (!isMatch) {
             return res.status(401).json({ error: 'Current password is incorrect.' });
         }
-
         const hashedPassword = await bcrypt.hash(newPassword, 12);
         await db.collection('users').updateOne(
             { _id: req.user._id },
             { $set: { password: hashedPassword, updatedAt: new Date() } }
         );
-
-        // Invalidate cache
         await cacheDel(`user:${req.user._id}`);
-
         res.json({ message: 'Password changed successfully.' });
     } catch (err) {
-        console.error('Change password error:', err);
         res.status(500).json({ error: 'Failed to change password.' });
     }
 });
 
-// ──────────────── POST /api/auth/bulk-create ────────────────
-// Admin-only: Create multiple users at once from a list of emails and names
-/**
- * @swagger
- * /api/auth/bulk-create:
- *   post:
- *     summary: Bulk create users
- *     tags: [Auth]
- *     responses:
- *       201:
- *         $ref: '#/components/responses/Created'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- *       403:
- *         $ref: '#/components/responses/Forbidden'
- */
-router.post('/bulk-create', authenticate, authorize('admin'), async (req, res) => {
+router.post('/bulk-create', authenticate, authorize('Admin'), async (req, res) => {
     try {
         const { users } = req.body;
-
         if (!Array.isArray(users) || users.length === 0) {
-            return res.status(400).json({
-                error: 'Provide an array of users with "name" and "email" fields.',
-                example: { users: [{ name: 'John Doe', email: 'john@example.com', role: 'student' }] },
-            });
+            return res.status(400).json({ error: 'Provide an array of users.' });
         }
-
-        if (users.length > 500) {
-            return res.status(400).json({ error: 'Maximum 500 users per batch.' });
-        }
-
         const db = getDB();
         const results = [];
         const failed = [];
-
         for (const userData of users) {
-            try {
-                const { name, email, role } = userData;
-
-                if (!name || !email) {
-                    failed.push({ email: email || 'N/A', reason: 'Name and email are required.' });
-                    continue;
-                }
-
-                if (!validator.isEmail(email)) {
-                    failed.push({ email, reason: 'Invalid email address.' });
-                    continue;
-                }
-
-                // Check if exists
-                const existing = await db.collection('users').findOne({ email: email.toLowerCase() });
-                if (existing) {
-                    failed.push({ email, reason: 'Email already registered.' });
-                    continue;
-                }
-
-                // Generate a random password
-                const plainPassword = generatePassword(10);
-                const hashedPassword = await bcrypt.hash(plainPassword, 10);
-
-                const avatarEmoji = role === 'specialist' ? '👨‍⚕️' : '👨‍🎓';
-                const newUser = {
-                    name: name.trim(),
-                    email: email.toLowerCase().trim(),
-                    password: hashedPassword,
-                    role: role === 'specialist' ? 'specialist' : 'student',
-                    avatar: avatarEmoji,
-                    verified: false,
-                    banned: false,
-                    bulkCreated: true,
-                    createdAt: new Date(),
-                    updatedAt: new Date(),
-                };
-
-                const result = await db.collection('users').insertOne(newUser);
-
-                results.push({
-                    id: result.insertedId.toString(),
-                    name: newUser.name,
-                    email: newUser.email,
-                    role: newUser.role,
-                    password: plainPassword, // Return plain password for distribution
-                });
-            } catch (err) {
-                failed.push({ email: userData.email || 'N/A', reason: err.message });
-            }
+             const { name, email, role } = userData;
+             const plainPassword = generatePassword(10);
+             const hashedPassword = await bcrypt.hash(plainPassword, 10);
+             const newUser = {
+                 name: name.trim(),
+                 email: email.toLowerCase().trim(),
+                 password: hashedPassword,
+                 role: role || ROLES.VOLUNTEER,
+                 avatar: '👤',
+                 verified: true,
+                 createdAt: new Date(),
+                 updatedAt: new Date(),
+             };
+             const result = await db.collection('users').insertOne(newUser);
+             results.push({ id: result.insertedId.toString(), name: newUser.name, email: newUser.email, role: newUser.role, password: plainPassword });
         }
-
-        res.status(201).json({
-            message: `Created ${results.length} users. ${failed.length} failed.`,
-            users: results,
-            failed,
-        });
+        res.status(201).json({ message: `Created ${results.length} users.`, users: results });
     } catch (err) {
-        console.error('Bulk create error:', err);
-        res.status(500).json({ error: 'Bulk user creation failed.' });
+        res.status(500).json({ error: 'Bulk creation failed.' });
     }
 });
 
-// ──────────────── POST /api/auth/logout ────────────────
-/**
- * @swagger
- * /api/auth/logout:
- *   post:
- *     summary: Log out the current user
- *     tags: [Auth]
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               refreshToken:
- *                 type: string
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
 router.post('/logout', authenticate, async (req, res) => {
     try {
         await cacheDel(`user:${req.user._id}`);

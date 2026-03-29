@@ -50,6 +50,25 @@ async function initCollections() {
         ]),
     ]);
 
+    // Seed default wing/committee if empty
+    const wingsCount = await db.collection('wings').countDocuments();
+    if (wingsCount === 0) {
+        console.log('Seeding default wing and committee...');
+        const wingResult = await db.collection('wings').insertOne({
+            name: 'General Wing',
+            description: 'Default organizational wing',
+            isActive: true,
+            createdAt: new Date()
+        });
+        await db.collection('committees').insertOne({
+            name: 'Core Committee',
+            wingId: wingResult.insertedId,
+            description: 'Default committee',
+            isActive: true,
+            createdAt: new Date()
+        });
+    }
+
     console.log('Collections initialized');
 }
 

@@ -31,6 +31,11 @@ const userSchema = new mongoose.Schema(
       enum: ['Super Admin', 'Admin', 'Team Lead', 'Volunteer', 'student'],
       default: ['Volunteer']
     },
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TeamDirectory',
+      default: null
+    },
 
     // scope and operational boundaries
     scope: {
@@ -38,8 +43,6 @@ const userSchema = new mongoose.Schema(
       enum: ['Entire CAPS', 'Their wing', 'Their committee', 'Only self'],
       default: 'Only self'
     },
-    wing: { type: String },
-    committee: { type: String },
 
     // Date of Birth
     dob: { type: Date, required: true },
@@ -48,6 +51,7 @@ const userSchema = new mongoose.Schema(
     resetOtp: { type: String, default: null },
     resetOtpExpiresAt: { type: Date, default: null },
   },
+
   { timestamps: true }
 );
 

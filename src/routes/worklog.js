@@ -10,9 +10,8 @@ const {
     assertAllowedStatus,
 } = require('../utils/worklog');
 const { ok, created, fail, parsePagination } = require('../utils/api');
-const Wing = require('../models/Wing');
-const Committee = require('../models/Committee');
 const WorkLog = require('../models/WorkLog');
+const { getDB } = require('../config/database');
 
 const router = express.Router();
 
@@ -31,8 +30,9 @@ router.use(authenticate);
  *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/wings', async (req, res) => {
-    const wings = await Wing.find({ isActive: { $ne: false } }).sort({ name: 1 }).toArray();
-    res.json({ items: wings });
+    const db = getDB();
+    const items = await db.collection('teamDirectories').find({ type: 'wing', isActive: { $ne: false } }).sort({ name: 1 }).toArray();
+    res.json({ items });
 });
 
 /**
@@ -104,8 +104,9 @@ router.post('/wings', async (req, res) => {
  *         $ref: '#/components/responses/Unauthorized'
  */
 router.get('/committees', async (req, res) => {
-    const committees = await Committee.find({ isActive: { $ne: false } }).sort({ name: 1 }).toArray();
-    res.json({ items: committees });
+    const db = getDB();
+    const items = await db.collection('teamDirectories').find({ type: 'committee', isActive: { $ne: false } }).sort({ name: 1 }).toArray();
+    res.json({ items });
 });
 
 /**
@@ -213,6 +214,36 @@ router.get('/logs', async (req, res) => {
 
         const total = await WorkLog.countDocuments(filter);
         const items = await WorkLog.find(filter).sort({ workDate: -1, createdAt: -1 }).skip(skip).limit(pageSize).toArray();
+        
+        const db = getDB();
+        const userIds = [...new Set(items.map(i => i.userId).filter(Boolean))];
+        const users = await db.collection('users').find({ _id: { $in: userIds } }).toArray();
+        const userMap = users.reduce((acc, u) => { acc[String(u._id)] = u.name; return acc; }, {});
+
+        const rows = await Promise.all(items.map(async (item) => {
+            let teamName = null;
+            if (item.teamId) {
+                const team = await db.collection('teamDirectories').findOne({ _id: item.teamId });
+                teamName = team?.name || 'Unknown Unit';
+            }
+
+            return {
+                id: item._id,
+                submitter: { id: item.userId, name: userMap[String(item.userId)] || 'Unknown User' },
+                title: item.title,
+                date: item.workDate,
+                hours: Math.floor(item.durationMinutes / 60),
+                minutes: item.durationMinutes % 60,
+                durationLabel: `${Math.floor(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m`,
+                tag: item.tag,
+                team: item.teamId ? { id: item.teamId, name: teamName } : null,
+                status: item.status,
+                description: item.description,
+                tlComment: item.revisionComment,
+                isOwn: String(item.userId) === String(req.user._id),
+            };
+        }));
+
         const countersRows = await WorkLog.aggregate([
             { $match: buildScopeMatch(req.user, { allowSelf: true }) },
             { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -222,25 +253,7 @@ router.get('/logs', async (req, res) => {
             return acc;
         }, {});
 
-        ok(res, {
-            rows: items.map((item) => ({
-                id: item._id,
-                submitter: { id: item.userId, name: null },
-                title: item.title,
-                date: item.workDate,
-                hours: Math.floor(item.durationMinutes / 60),
-                minutes: item.durationMinutes % 60,
-                durationLabel: `${Math.floor(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m`,
-                tag: item.tag,
-                wing: item.wingId ? { id: item.wingId, name: null } : null,
-                committee: item.committeeId ? { id: item.committeeId, name: null } : null,
-                status: item.status,
-                description: item.description,
-                tlComment: item.revisionComment,
-                isOwn: String(item.userId) === String(req.user._id),
-            })),
-            counters,
-        }, { page, pageSize, total });
+        ok(res, { rows, counters }, { page, pageSize, total });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
@@ -290,7 +303,7 @@ router.post('/logs', async (req, res) => {
 
         assertAllowedStatus(status, WORK_LOG_STATUSES, 'status');
 
-        const scoped = resolveScopedFields(req.user, { wingId, committeeId });
+        const scoped = resolveScopedFields(req.user, { teamId: req.body.teamId });
         const doc = {
             userId: parseObjectId(req.user._id, '_id'),
             title: String(title).trim(),
@@ -299,8 +312,7 @@ router.post('/logs', async (req, res) => {
             durationMinutes: totalMinutes,
             status,
             tag: tag ? String(tag).trim() : '',
-            wingId: scoped.wingId,
-            committeeId: scoped.committeeId,
+            teamId: scoped.teamId,
             scopeSource: scoped.scopeSource,
             submittedAt: status === 'pending_review' ? new Date() : null,
             approvedAt: status === 'approved' ? new Date() : null,
@@ -312,6 +324,14 @@ router.post('/logs', async (req, res) => {
 
         const result = await WorkLog.insertOne(doc);
         doc._id = result.insertedId;
+        
+        // Populate team info for frontend
+        if (doc.teamId) {
+            const db = getDB();
+            const team = await db.collection('teamDirectories').findOne({ _id: doc.teamId });
+            doc.team = team ? { id: team._id, name: team.name } : null;
+        }
+
         created(res, doc);
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);

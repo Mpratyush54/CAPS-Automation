@@ -31,8 +31,8 @@ async function verifyToken(token) {
         await cacheSet(cacheKey, user, 300);
     }
 
-    if (user.banned || !user.verified) {
-        throw new Error('Your account has been suspended or is not verified');
+    if (user.banned) {
+        throw new Error('Your account has been suspended');
     }
 
     return user;
@@ -61,7 +61,7 @@ async function authenticate(req, res, next) {
         if (err.message === 'User not found') {
             return res.status(401).json({ error: err.message });
         }
-        if (err.message === 'Your account has been suspended or is not verified') {
+        if (err.message === 'Your account has been suspended') {
             return res.status(403).json({ error: err.message });
         }
 

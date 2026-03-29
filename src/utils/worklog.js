@@ -100,26 +100,33 @@ function isLeadLike(role) {
 function resolveScopedFields(user, input = {}) {
     if (isAdminLike(user.role)) {
         return {
-            wingId: parseObjectId(input.wingId, 'wingId'),
-            committeeId: parseObjectId(input.committeeId, 'committeeId'),
+            teamId: parseObjectId(input.teamId, 'teamId'),
             scopeSource: 'manually_selected_scope',
         };
     }
 
+    if (user.teamId) {
+        return {
+            teamId: parseObjectId(user.teamId, 'teamId'),
+            scopeSource: 'inherited_user_score',
+        };
+    }
+
     return {
-        wingId: user.primaryWingId ? parseObjectId(user.primaryWingId, 'primaryWingId') : null,
-        committeeId: user.primaryCommitteeId ? parseObjectId(user.primaryCommitteeId, 'primaryCommitteeId') : null,
-        scopeSource: 'inherited_user_scope',
+        teamId: parseObjectId(input.teamId, 'teamId'),
+        scopeSource: 'self_selected_during_transition',
     };
 }
 
-function buildScopeMatch(user, { wingField = 'wingId', committeeField = 'committeeId', userField = 'userId', allowSelf = false } = {}) {
+function buildScopeMatch(user, { userField = 'userId', teamField = 'teamId', allowSelf = false } = {}) {
     if (user.role === ROLES.SUPER_ADMIN) {
         return {};
     }
 
     if (user.role === ROLES.ADMIN) {
-        return user.primaryWingId ? { [wingField]: parseObjectId(user.primaryWingId, 'primaryWingId') } : {};
+        // Admins might still be filtered by their own team if needed, but usually see all in their wing
+        // For simplicity with the new model, we just use teamId if they have one or return all
+        return user.teamId ? { [teamField]: parseObjectId(user.teamId, 'teamId') } : {};
     }
 
     const filters = [];
@@ -128,12 +135,8 @@ function buildScopeMatch(user, { wingField = 'wingId', committeeField = 'committ
         filters.push({ [userField]: parseObjectId(user._id, '_id') });
     }
 
-    if (user.primaryCommitteeId) {
-        filters.push({ [committeeField]: parseObjectId(user.primaryCommitteeId, 'primaryCommitteeId') });
-    }
-
-    if (user.primaryWingId) {
-        filters.push({ [wingField]: parseObjectId(user.primaryWingId, 'primaryWingId') });
+    if (user.teamId) {
+        filters.push({ [teamField]: parseObjectId(user.teamId, 'teamId') });
     }
 
     if (filters.length === 0) {
