@@ -5,8 +5,22 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ['returns-columns-mart-priorities.trycloudflare.com',
-      'pond-interval-hewlett-consecutive.trycloudflare.com'
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        ws: true,
+      },
+    },
+    allowedHosts: [
+      'returns-columns-mart-priorities.trycloudflare.com',
+      'pond-interval-hewlett-consecutive.trycloudflare.com',
+      '.trycloudflare.com'
     ],
   },
 })

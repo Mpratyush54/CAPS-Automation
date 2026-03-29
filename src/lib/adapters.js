@@ -1,4 +1,5 @@
 import { formatDateInput, formatDurationLabel, titleizeStatus } from './api';
+import { ROLES } from '../rbac';
 
 const scopeName = (scope) => {
   if (!scope) return '';
@@ -9,7 +10,7 @@ const scopeName = (scope) => {
 export const normalizeUser = (user) => {
   if (!user) return null;
   return {
-    id: user.id || user._id || null,
+    id: String(user.id || user._id || ''),
     name: user.name || 'User',
     email: user.email || '',
     wing: scopeName(user.wing) || user.wingName || user.labelOne || null,
@@ -23,7 +24,7 @@ export const normalizeUser = (user) => {
 export const normalizeLog = (log, currentUserId) => {
   const durationMinutes = Number(log.durationMinutes || 0);
   return {
-    id: log._id || log.id,
+    id: String(log._id || log.id || ''),
     submitter: log.submitter?.name || log.user?.name || log.userName || log.submitterName || 'Me',
     title: log.title || '',
     date: formatDateInput(log.workDate || log.date),
@@ -33,8 +34,9 @@ export const normalizeLog = (log, currentUserId) => {
     tag: log.tag || '',
     wing: scopeName(log.wing) || log.wingName || '',
     committee: scopeName(log.committee) || log.committeeName || '',
-    status: titleizeStatus(log.status || 'draft'),
-    isOwn: (log.userId || log.user?._id || log.user?.id) === currentUserId || !!log.isOwn,
+    team: log.team || (log.teamId ? { id: log.teamId, name: log.teamName } : null),
+    status: (log.status || 'draft').toLowerCase(),
+    isOwn: String(log.userId || log.user?._id || log.user?.id) === String(currentUserId) || !!log.isOwn,
     tlComment: log.revisionComment || log.tlComment || null,
     notes: log.description || log.notes || '',
     description: log.description || '',
@@ -82,20 +84,39 @@ export const normalizeNotification = (item) => ({
   audience: item.audience || item.audienceLabel || 'You',
 });
 
-export const normalizeTeam = (team) => ({
-  id: team._id || team.id,
-  labelOne: team.labelOne || team.labelOneName || '',
-  labelTwo: team.labelTwo || team.labelTwoName || '',
-  lead: team.lead?.name || team.leadName || team.lead || 'Unassigned',
-  focus: team.focus || '',
-  members: (team.members || []).map((member) => ({
-    id: member._id || member.id,
-    name: member.name || '',
-    email: member.email || '',
-    role: member.role || 'Volunteer',
-    joined: formatDateInput(member.joined || member.joinDate || member.createdAt),
-  })),
-});
+export const normalizeTeam = (team) => {
+  if (!team) return null;
+  const leadIds = Array.from(new Set([
+    ...(team.leadUserIds || []).map(id => String(id)),
+    team.leadUserId ? String(team.leadUserId) : null,
+    team.leadId ? String(team.leadId) : null
+  ].filter(Boolean)));
+  
+  return {
+    id: String(team._id || team.id || ''),
+    wingId: team.labelOneWingId || team.wingId || null,
+    committeeId: team.labelTwoCommitteeId || team.committeeId || null,
+    labelOne: team.labelOne || team.labelOneName || '',
+    labelTwo: team.labelTwo || team.labelTwoName || '',
+    leadIds,
+    lead: team.lead?.name || team.leadName || team.lead || (leadIds.length > 0 ? `${leadIds.length} Leaders` : 'Unassigned'),
+    focus: team.focus || '',
+    members: (team.members || []).map((member) => {
+      const mId = String(member._id || member.id || '');
+      const mRole = member.role || 'Volunteer';
+      const isLead = leadIds.includes(mId) || [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(mRole);
+      
+      return {
+        id: mId,
+        name: member.name || '',
+        email: member.email || '',
+        role: mRole,
+        isLead,
+        joined: formatDateInput(member.joined || member.joinDate || member.createdAt),
+      };
+    }),
+  };
+};
 
 export const normalizeReportRow = (row) => ({
   id: row._id || row.id,

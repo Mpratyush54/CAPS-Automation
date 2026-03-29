@@ -32,16 +32,22 @@ const RoleGuard = ({ minRole, children }) => {
   return hasMinRole(role, minRole) ? children : <Navigate to="/dashboard" replace />;
 };
 
-/* ── Spinner ──────────────────────────────────────────────────── */
-const Spinner = () => (
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '50vh' }}>
+/* ── Premium Loader ─────────────────────────────────────────── */
+const PremiumLoader = () => (
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: '2rem' }}>
+    <div className="loader-orbit">
+      <div className="loader-core" />
+      <div className="loader-ring layer-1" />
+      <div className="loader-ring layer-2" />
+      <div className="loader-ring layer-3" />
+    </div>
     <div style={{
-      width: '2rem', height: '2rem',
-      border: '3px solid var(--color-primary-fixed)',
-      borderTopColor: 'var(--color-primary)',
-      borderRadius: '9999px',
-      animation: 'spin 0.8s linear infinite',
-    }} />
+      fontSize: '0.75rem', fontWeight: '600', letterSpacing: '0.1em',
+      textTransform: 'uppercase', color: 'var(--color-primary)',
+      animation: 'fadeIn 1s ease-in-out infinite alternate'
+    }}>
+      Loading CAPS Automation...
+    </div>
   </div>
 );
 
@@ -84,7 +90,7 @@ const AppLayout = ({ children }) => (
   <div className="app-layout">
     <Sidebar />
     <div className="main-content">
-      <Suspense fallback={<Spinner />}>
+      <Suspense fallback={<PremiumLoader />}>
         {children}
       </Suspense>
     </div>
@@ -101,10 +107,10 @@ function App() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={
-          <Suspense fallback={null}><Login /></Suspense>
+          <Suspense fallback={<PremiumLoader />}><Login /></Suspense>
         } />
         <Route path="/signup" element={
-          <Suspense fallback={null}><Login initialMode="signup" /></Suspense>
+          <Suspense fallback={<PremiumLoader />}><Login initialMode="signup" /></Suspense>
         } />
 
         {/* Protected */}

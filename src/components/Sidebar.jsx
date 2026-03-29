@@ -51,7 +51,7 @@ const Sidebar = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0 0.5rem' }}>
           <div className="sidebar-logo" style={{ margin: 0, padding: 0 }}>
             <Zap size={18} style={{ display: 'inline', marginRight: '6px', color: '#6b6bff' }} />
-            Work<span>Log</span>
+            CAPS<span>Automation</span>
           </div>
           <button
             onClick={close}
@@ -63,7 +63,7 @@ const Sidebar = () => {
         </div>
 
         {/* Nav */}
-        <p className="section-label" style={{ marginTop: 0 }}>Navigation</p>
+        <p className="section-label" style={{ marginTop: 0 }}>Organization</p>
         <nav>
           {navItems.map(({ to, icon, label }) => {
             const Icon = ICONS[icon];
@@ -83,7 +83,7 @@ const Sidebar = () => {
 
         {/* User block */}
         <div style={{ marginTop: 'auto' }}>
-          <p className="section-label">Account</p>
+          <p className="section-label">Session</p>
           <div style={{ background: 'var(--color-surface-lowest)', borderRadius: '0.75rem', padding: '0.75rem', marginBottom: '0.75rem', boxShadow: 'var(--shadow-card)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
               <div className="avatar" style={{ width: '2rem', height: '2rem', fontSize: '0.75rem', flexShrink: 0 }}>
@@ -103,11 +103,6 @@ const Sidebar = () => {
                 </span>
               </div>
             </div>
-            {(user?.wing || user?.committee) && (
-              <p style={{ margin: '0.5rem 0 0', fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)', padding: '0.375rem 0.5rem', background: 'var(--color-surface-low)', borderRadius: '0.375rem', lineHeight: 1.4 }}>
-                {[user.wing, user.committee].filter(Boolean).join(' · ')}
-              </p>
-            )}
           </div>
 
           <button

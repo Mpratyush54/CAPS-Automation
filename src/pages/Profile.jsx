@@ -1,78 +1,70 @@
 import { useEffect, useState } from 'react';
-import { Camera, Edit2, Save, X, Clock, CheckCircle2, Calendar, Shield } from 'lucide-react';
+import { Camera, Edit2, Save, X, Clock, CheckCircle2, Calendar, Shield, Loader2 } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { api, getErrorMessage, unwrap } from '../lib/api';
 
-const activityLog = [
-  { action: 'Sprint Planning Review logged', time: '30m ago', type: 'log' },
-  { action: 'Annual Volunteer Drive registered', time: '2h ago', type: 'event' },
-  { action: 'Q1 Review Board notification sent', time: '1d ago', type: 'notif' },
-  { action: 'Budget Review started', time: '2d ago', type: 'log' },
-];
-
 const Profile = () => {
   const { user, role, setUser } = useAuthStore();
-  const [serverActivity, setServerActivity] = useState(activityLog);
-  const [stats, setStats] = useState({ hours: '234', logs: '64' });
+  const [serverActivity, setServerActivity] = useState([]);
+  const [stats, setStats] = useState({ hours: '0', logs: '0' });
   const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [form, setForm]       = useState({
-    name:       user?.name || 'User',
-    email:      user?.email || 'user@worklog.io',
-    phone:      '+91 98765 43210',
-    wing:       'Tech Wing',
-    committee:  'Dev Board',
-    joinDate:   '2025-09-15',
-    bio:        'Passionate volunteer with a focus on technology-driven solutions for organizational growth.',
+  
+  const [form, setForm] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: '',
+    wing: '',
+    committee: '',
+    joinDate: '',
+    bio: '',
   });
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
     let mounted = true;
     const loadProfile = async () => {
+      setLoading(true);
       try {
         const response = await api.get('/api/profile/me');
         const payload = unwrap(response) || {};
         if (!mounted) return;
+        
         const nextUser = payload.user || {};
-        setForm((current) => ({
-          ...current,
-          name: nextUser.name || current.name,
-          email: nextUser.email || current.email,
-          phone: nextUser.phone || current.phone,
-          wing: nextUser.wing || current.wing,
-          committee: nextUser.committee || current.committee,
-          joinDate: nextUser.joinDate?.slice?.(0, 10) || current.joinDate,
-          bio: nextUser.bio || current.bio,
-        }));
-        setStats((currentStats) => ({
-          hours: String(payload.summary?.hours ?? currentStats.hours ?? '234'),
-          logs: String(payload.summary?.logs ?? currentStats.logs ?? '64'),
-        }));
-        if (Array.isArray(payload.recentActivity) && payload.recentActivity.length) {
-          setServerActivity(payload.recentActivity.map((item) => ({
-            action: item.action || 'Activity',
-            time: item.timeLabel || item.time || '',
-            type: item.type || 'log',
-          })));
-        }
-        setUser({
-          ...(user || {}),
-          name: nextUser.name || user?.name,
-          email: nextUser.email || user?.email,
-          wing: nextUser.wing || user?.wing,
-          committee: nextUser.committee || user?.committee,
+        setForm({
+          name: nextUser.name || '',
+          email: nextUser.email || '',
+          phone: nextUser.phone || '',
+          wing: nextUser.wing || '',
+          committee: nextUser.committee || '',
+          joinDate: nextUser.joinDate?.slice(0, 10) || '',
+          bio: nextUser.bio || '',
         });
-      } catch {
-        // Keep seeded profile state as fallback.
+        
+        setStats({
+          hours: String(payload.summary?.hours || 0),
+          logs: String(payload.summary?.logs || 0),
+        });
+        
+        setServerActivity((payload.recentActivity || []).map(a => ({
+          action: a.action || 'Activity',
+          time: a.timeLabel || '',
+          type: a.type || 'log'
+        })));
+        
+        setError(null);
+      } catch (err) {
+        if (mounted) setError(getErrorMessage(err, 'Failed to load profile.'));
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
     loadProfile();
-    return () => {
-      mounted = false;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { mounted = false; };
+  }, []);
 
   const handleSave = async () => {
     setError(null);
@@ -82,132 +74,110 @@ const Profile = () => {
         phone: form.phone,
         bio: form.bio,
       });
-    } catch (saveError) {
-      setError(getErrorMessage(saveError, 'Unable to update profile.'));
-      return;
+      setUser({ ...user, name: form.name });
+      setEditing(false);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Unable to update profile.'));
     }
-    setUser({ ...(user || {}), name: form.name, email: form.email, wing: form.wing, committee: form.committee });
-    setEditing(false);
   };
 
   const roleBadge = { Volunteer: 'badge-neutral', 'Team Lead': 'badge-secondary', Admin: 'badge-primary', 'Super Admin': 'badge-error' };
 
   return (
     <>
-      <TopBar title="Profile" />
+      <TopBar title="User Profile" />
       <div className="page-body">
-        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div>}
-        <div className="profile-layout">
-
-          {/* Left: Avatar + info card */}
-          <div className="profile-sidebar">
+        {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', borderRadius: '0.625rem' }}>{error}</div>}
+        
+        <div className="profile-layout" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1.5rem', alignItems: 'start' }}>
+          <div className="profile-sidebar" style={{ display: 'grid', gap: '1.5rem' }}>
             <div className="card" style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
               <div style={{ position: 'relative', display: 'inline-block', marginBottom: '1rem' }}>
-                <div style={{
-                  width: '5rem', height: '5rem', borderRadius: '9999px',
-                  background: 'var(--gradient-primary)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '2rem', fontWeight: 700, color: '#fff', margin: '0 auto',
-                  boxShadow: '0 8px 24px rgba(67,67,213,0.25)',
-                }}>
+                <div style={{ width: '5rem', height: '5rem', borderRadius: '9999px', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', fontWeight: 700, color: '#fff', margin: '0 auto' }}>
                   {form.name.charAt(0)}
                 </div>
-                <button style={{
-                  position: 'absolute', bottom: 0, right: 0,
-                  width: '1.75rem', height: '1.75rem', borderRadius: '9999px',
-                  background: 'var(--color-primary)', border: '2px solid #fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', color: '#fff',
-                }}>
-                  <Camera size={11} />
-                </button>
               </div>
               <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.125rem', fontWeight: 700 }}>{form.name}</h2>
               <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: 'var(--color-on-surface-variant)' }}>{form.email}</p>
-              <span className={`badge ${roleBadge[role] || 'badge-neutral'}`} style={{ fontSize: '0.75rem' }}>
-                <Shield size={10} /> {role || 'Member'}
+              <span className={`badge ${roleBadge[role] || 'badge-neutral'}`}>
+                <Shield size={10} /> {role}
               </span>
-              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--color-surface-high)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                {[{ label: 'Hours', value: stats.hours }, { label: 'Logs', value: stats.logs }].map(({ label, value }) => (
-                  <div key={label} style={{ background: 'var(--color-surface-low)', borderRadius: '0.5rem', padding: '0.5rem' }}>
-                    <p style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{value}</p>
-                    <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>{label}</p>
-                  </div>
-                ))}
+              
+              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-surface-high)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div style={{ background: 'var(--color-surface-low)', borderRadius: '0.5rem', padding: '0.75rem' }}>
+                  <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>{stats.hours}</p>
+                  <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>Total Hours</p>
+                </div>
+                <div style={{ background: 'var(--color-surface-low)', borderRadius: '0.5rem', padding: '0.75rem' }}>
+                  <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>{stats.logs}</p>
+                  <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>Total Logs</p>
+                </div>
               </div>
             </div>
 
-            {/* Recent activity */}
             <div className="card">
-              <h3 style={{ margin: '0 0 0.875rem', fontSize: '0.875rem', fontWeight: 700 }}>Recent Activity</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+              <h3 style={{ margin: '0 0 1rem', fontSize: '0.875rem', fontWeight: 700 }}>Recent Activity</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 {serverActivity.map((a, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '0.625rem', alignItems: 'flex-start' }}>
-                    <div style={{ width: '1.75rem', height: '1.75rem', borderRadius: '0.375rem', background: 'var(--color-primary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {a.type === 'log' ? <Clock size={11} style={{ color: 'var(--color-primary)' }} /> : a.type === 'event' ? <Calendar size={11} style={{ color: 'var(--color-primary)' }} /> : <CheckCircle2 size={11} style={{ color: 'var(--color-primary)' }} />}
+                  <div key={i} style={{ display: 'flex', gap: '0.75rem' }}>
+                    <div style={{ width: '1.75rem', height: '1.75rem', borderRadius: '0.5rem', background: 'var(--color-primary-fixed)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Clock size={11} style={{ color: 'var(--color-primary)' }} />
                     </div>
                     <div>
-                      <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500, lineHeight: 1.4 }}>{a.action}</p>
+                      <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 500 }}>{a.action}</p>
                       <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>{a.time}</p>
                     </div>
                   </div>
                 ))}
+                {serverActivity.length === 0 && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-outline)', textAlign: 'center' }}>No recent activity recorded.</p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Right: Edit form */}
           <div className="card">
-            <div className="profile-header">
-              <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 700 }}>Personal Information</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Profile Information</h3>
               {editing ? (
-                <div className="profile-actions">
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button className="btn-secondary" onClick={() => setEditing(false)}><X size={14} /> Cancel</button>
                   <button className="btn-primary" onClick={handleSave}><Save size={14} /> Save</button>
                 </div>
               ) : (
-                <button className="btn-ghost" onClick={() => setEditing(true)}><Edit2 size={14} /> Edit Profile</button>
+                <button className="btn-ghost" onClick={() => setEditing(true)}><Edit2 size={14} /> Edit</button>
               )}
             </div>
 
-            <div className="profile-form-grid">
-              {[
-                { label: 'Full Name', key: 'name', type: 'text' },
-                { label: 'Email Address', key: 'email', type: 'email' },
-                { label: 'Phone Number', key: 'phone', type: 'tel' },
-                { label: 'Date Joined', key: 'joinDate', type: 'date' },
-                { label: 'Wing', key: 'wing', type: 'text' },
-                { label: 'Committee', key: 'committee', type: 'text' },
-              ].map(({ label, key, type }) => (
-                <div key={key}>
-                  <label className="input-label">{label}</label>
-                  {editing ? (
-                    <input className="input-field" type={type} value={form[key]} onChange={e => set(key, e.target.value)} />
-                  ) : (
-                    <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 500, color: 'var(--color-on-surface)', padding: '0.625rem 0' }}>
-                      {form[key] || '—'}
-                    </p>
-                  )}
-                </div>
-              ))}
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label className="input-label">Bio</label>
-                {editing ? (
-                  <textarea className="input-field" rows={4} value={form.bio} onChange={e => set('bio', e.target.value)} style={{ resize: 'vertical' }} />
-                ) : (
-                  <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-on-surface)', lineHeight: 1.6, padding: '0.625rem 0' }}>{form.bio}</p>
-                )}
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+               <div>
+                  <label className="input-label">Full Name</label>
+                  {editing ? <input className="input-field" value={form.name} onChange={e => set('name', e.target.value)} /> : <p style={{ padding: '0.5rem 0' }}>{form.name || '—'}</p>}
+               </div>
+               <div>
+                  <label className="input-label">Email Address</label>
+                  <p style={{ padding: '0.5rem 0', color: 'var(--color-outline)' }}>{form.email}</p>
+               </div>
+               <div>
+                  <label className="input-label">Phone Number</label>
+                  {editing ? <input className="input-field" value={form.phone} onChange={e => set('phone', e.target.value)} /> : <p style={{ padding: '0.5rem 0' }}>{form.phone || '—'}</p>}
+               </div>
+               <div>
+                  <label className="input-label">Date Joined</label>
+                  <p style={{ padding: '0.5rem 0' }}>{form.joinDate || '—'}</p>
+               </div>
+               <div style={{ gridColumn: '1 / -1' }}>
+                  <label className="input-label">Bio</label>
+                  {editing ? <textarea className="input-field" rows={4} value={form.bio} onChange={e => set('bio', e.target.value)} style={{ resize: 'vertical' }} /> : <p style={{ padding: '0.5rem 0', lineHeight: 1.6 }}>{form.bio || '—'}</p>}
+               </div>
             </div>
 
-            {/* Security section */}
             <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-surface-high)' }}>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 700 }}>Security</h3>
-              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <button className="btn-secondary">Change Password</button>
-                <button className="btn-secondary">Two-Factor Auth</button>
-                <button className="btn-danger">Delete Account</button>
-              </div>
+               <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 700 }}>Security</h3>
+               <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button className="btn-secondary">Change Password</button>
+                  <button className="btn-secondary">Enable 2FA</button>
+               </div>
             </div>
           </div>
         </div>

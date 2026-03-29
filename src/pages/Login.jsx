@@ -95,12 +95,13 @@ const Login = ({ initialMode = 'login' }) => {
           <div style={{ width: '3rem', height: '3rem', borderRadius: '0.875rem', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', boxShadow: '0 8px 24px rgba(67,67,213,0.3)' }}>
             {isSignup ? <UserPlus size={22} color="#ffffff" /> : <Zap size={22} color="#ffffff" />}
           </div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>WorkLog</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', marginTop: '0.375rem' }}>The Kinetic Work Organization System</p>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>CAPS Automation</h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', marginTop: '0.375rem' }}>Next-Gen Organizational Workflow</p>
         </div>
 
         <div className="card" style={{ padding: '2rem' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.5rem', background: 'var(--color-surface-low)', padding: '0.35rem', borderRadius: '0.75rem' }}>
+
             {['login', 'signup'].map((value) => (
               <button
                 key={value}
