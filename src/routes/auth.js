@@ -172,6 +172,15 @@ router.post('/login', async (req, res) => {
             refreshToken,
             user: sanitizeUser(user),
         });
+
+        // Background notification for security visibility
+        const { sendSystemNotification } = require('../utils/notifications');
+        sendSystemNotification(user._id, {
+            title: 'New Login Detected 🛡️',
+            body: `A new session was started successfully for your account.`,
+            type: 'security',
+            url: '/profile'
+        }).catch(() => {});
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ error: 'Login failed.' });

@@ -10,13 +10,23 @@ const router = express.Router();
 
 router.use(authenticate);
 
-/**
- * @swagger
- * /api/stats/overview:
- *   get:
- *     summary: Get KPI and chart data for the stats page
- *     tags: [Stats]
- */
+/* -------------------- HELPERS -------------------- */
+
+// Resolves a list of team IDs based on wing (labelOne) and committee (labelTwo) filters
+async function getTargetTeamIds(db, labelOneId, labelTwoId) {
+    if (labelTwoId) {
+        return [parseObjectId(labelTwoId, 'labelTwoId')];
+    }
+    if (labelOneId) {
+        const wingId = parseObjectId(labelOneId, 'labelOneId');
+        const children = await db.collection('teamDirectories')
+            .find({ wingId, isActive: { $ne: false } })
+            .project({ _id: 1 })
+            .toArray();
+        return [wingId, ...children.map(c => c._id)];
+    }
+    return null; // All
+}
 
 async function aggregateLogs(db, match, period = 'monthly') {
     const bounds = getPeriodBounds(period);
@@ -27,17 +37,17 @@ async function aggregateLogs(db, match, period = 'monthly') {
 }
 
 async function getPieBreakdown(db, match, view) {
-    const groupField = view === 'global' ? '$wingId' : '$committeeId';
+    // In the unified model, we group by teamId
     const rows = await db.collection('workLogs').aggregate([
         { $match: { ...match, status: { $in: ['approved', 'Completed'] } } },
-        { $group: { _id: groupField, value: { $sum: '$durationMinutes' } } }
+        { $group: { _id: '$teamId', value: { $sum: '$durationMinutes' } } }
     ]).toArray();
 
     const total = rows.reduce((acc, r) => acc + r.value, 0);
     if (total === 0) return [];
 
-    const collection = view === 'global' ? 'wings' : 'committees';
-    const lookup = await db.collection(collection).find({ _id: { $in: rows.map(r => r._id).filter(Boolean) } }).toArray();
+    const teamIds = rows.map(r => r._id).filter(Boolean);
+    const lookup = await db.collection('teamDirectories').find({ _id: { $in: teamIds } }).toArray();
 
     return rows.map(r => {
         const doc = lookup.find(l => String(l._id) === String(r._id));
@@ -71,13 +81,13 @@ async function getTrends(db, match, months = 6) {
     return result;
 }
 
+/* -------------------- ROUTES -------------------- */
+
 router.get('/overview', cacheResponse((req) => `stats:overview:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
-    const match = {};
+    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, req.query.labelTwoId);
+    const match = teamIds ? { teamId: { $in: teamIds } } : {};
     const view = req.query.view || 'team';
-
-    if (req.query.labelOneId) match.wingId = parseObjectId(req.query.labelOneId, 'labelOneId');
-    if (req.query.labelTwoId) match.committeeId = parseObjectId(req.query.labelTwoId, 'labelTwoId');
 
     const stats = (await aggregateLogs(db, match, req.query.period === '6m' ? '6m' : 'monthly'))[0] || { minutes: 0, logs: 0 };
     const events = await db.collection('events').countDocuments(match);
@@ -108,18 +118,16 @@ router.get('/overview', cacheResponse((req) => `stats:overview:${req.user?._id}:
 
 router.get('/breakdown', cacheResponse((req) => `stats:breakdown:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
-    const view = req.query.view;
-    const match = {};
-    if (req.query.labelOneId) match.wingId = parseObjectId(req.query.labelOneId, 'labelOneId');
+    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, null);
+    const match = teamIds ? { teamId: { $in: teamIds } } : {};
 
     const rows = await db.collection('workLogs').aggregate([
         { $match: { ...match, status: { $in: ['approved', 'Completed'] } } },
-        { $group: { _id: view === 'global-label-one' ? '$wingId' : '$committeeId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 } } },
+        { $group: { _id: '$teamId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 } } },
         { $sort: { hours: -1 } },
     ]).toArray();
 
-    const collection = view === 'global-label-one' ? 'wings' : 'committees';
-    const lookup = await db.collection(collection).find({ _id: { $in: rows.map(r => r._id).filter(Boolean) } }).toArray();
+    const lookup = await db.collection('teamDirectories').find({ _id: { $in: rows.map(r => r._id).filter(Boolean) } }).toArray();
 
     const payload = {
         rows: rows.map((row) => {
@@ -139,19 +147,17 @@ router.get('/breakdown', cacheResponse((req) => `stats:breakdown:${req.user?._id
 
 router.get('/contributions', cacheResponse((req) => `stats:contrib:${req.user?._id}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
+    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, req.query.labelTwoId);
     const match = { status: { $in: ['approved', 'Completed'] } };
-    if (req.query.labelOneId) match.wingId = parseObjectId(req.query.labelOneId, 'labelOneId');
-    if (req.query.labelTwoId) match.committeeId = parseObjectId(req.query.labelTwoId, 'labelTwoId');
+    if (teamIds) match.teamId = { $in: teamIds };
 
     const rows = await db.collection('workLogs').aggregate([
         { $match: match },
-        { $group: { _id: '$userId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 }, wingId: { $first: '$wingId' }, committeeId: { $first: '$committeeId' } } },
+        { $group: { _id: '$userId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 }, teamId: { $first: '$teamId' } } },
         { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
         { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-        { $lookup: { from: 'wings', localField: 'wingId', foreignField: '_id', as: 'wing' } },
-        { $lookup: { from: 'committees', localField: 'committeeId', foreignField: '_id', as: 'committee' } },
-        { $unwind: { path: '$wing', preserveNullAndEmptyArrays: true } },
-        { $unwind: { path: '$committee', preserveNullAndEmptyArrays: true } },
+        { $lookup: { from: 'teamDirectories', localField: 'teamId', foreignField: '_id', as: 'team' } },
+        { $unwind: { path: '$team', preserveNullAndEmptyArrays: true } },
         { $sort: { hours: -1 } },
     ]).toArray();
 
@@ -159,8 +165,8 @@ router.get('/contributions', cacheResponse((req) => `stats:contrib:${req.user?._
         rows: rows.map((row) => ({
             id: row._id,
             volunteer: row.user?.name || 'Unknown',
-            labelOne: row.wing?.name || 'Unassigned',
-            labelTwo: row.committee?.name || 'Unassigned',
+            labelOne: row.team?.type === 'wing' ? row.team?.name : '-', // Simplified for new model
+            labelTwo: row.team?.name || 'Unassigned',
             hours: Number(row.hours.toFixed(1)),
             logs: row.logs,
         })),

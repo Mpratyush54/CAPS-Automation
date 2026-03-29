@@ -214,7 +214,7 @@ router.get('/logs', async (req, res) => {
 
         const total = await WorkLog.countDocuments(filter);
         const items = await WorkLog.find(filter).sort({ workDate: -1, createdAt: -1 }).skip(skip).limit(pageSize).toArray();
-        
+
         const db = getDB();
         const userIds = [...new Set(items.map(i => i.userId).filter(Boolean))];
         const users = await db.collection('users').find({ _id: { $in: userIds } }).toArray();
@@ -294,7 +294,7 @@ router.get('/logs', async (req, res) => {
  */
 router.post('/logs', async (req, res) => {
     try {
-        const { title, description, workDate, durationMinutes, hours, minutes, status = 'draft', tag, wingId, committeeId } = req.body;
+        const { title, description, workDate, durationMinutes, hours, minutes, status = 'draft', tag, teamId } = req.body;
         const totalMinutes = Number(durationMinutes || 0) || ((Number(hours || 0) * 60) + Number(minutes || 0));
 
         if (!title || !workDate || totalMinutes < 1) {
@@ -303,7 +303,7 @@ router.post('/logs', async (req, res) => {
 
         assertAllowedStatus(status, WORK_LOG_STATUSES, 'status');
 
-        const scoped = resolveScopedFields(req.user, { teamId: req.body.teamId });
+        const scoped = resolveScopedFields(req.user, { teamId });
         const doc = {
             userId: parseObjectId(req.user._id, '_id'),
             title: String(title).trim(),
@@ -324,7 +324,58 @@ router.post('/logs', async (req, res) => {
 
         const result = await WorkLog.insertOne(doc);
         doc._id = result.insertedId;
-        
+
+        // FIRE AUTOMATED NOTIFICATIONS if submitted immediately
+        if (status === 'pending_review') {
+            console.log(`📝 [LOG-SUBMIT-DIRECT] User: ${req.user.name} (${req.user.role}) | Log: ${doc.title}`);
+            const { sendSystemNotification, notifyAdmins } = require('../utils/notifications');
+            const db = getDB();
+
+            if (req.user.role === ROLES.TEAM_LEAD) {
+                console.log('👷 [LOG-SUBMIT] Role is Team Lead. Notifying Admins...');
+                await notifyAdmins({
+                    title: 'Unit Submission 📋',
+                    body: `${req.user.name} (Lead) has created and submitted a work log for review.`,
+                    type: 'log',
+                    url: `/logs`
+                });
+            } else if (doc.teamId) {
+                console.log(`👷 [LOG-SUBMIT] Role is Volunteer. Looking for Lead of Team: ${doc.teamId}...`);
+                const team = await db.collection('teamDirectories').findOne({ _id: parseObjectId(doc.teamId) });
+                if (team) {
+                    const leads = new Set();
+                    if (team.leadUserId) leads.add(String(team.leadUserId));
+                    if (Array.isArray(team.leadUserIds)) team.leadUserIds.forEach(id => leads.add(String(id)));
+
+                    console.log(`👷 [LOG-SUBMIT] Found Team: ${team.name} | Total Leads: ${leads.size}`);
+                    
+                    if (leads.size > 0) {
+                        for (const leadId of leads) {
+                            await sendSystemNotification(leadId, {
+                                title: 'New Log Submission 📝',
+                                body: `${req.user.name} submitted a new log: "${doc.title}"`,
+                                type: 'log',
+                                url: `/logs`
+                            });
+                        }
+                    } else {
+                        // FALLBACK TO ADMINS if team has no lead
+                        console.log('👷 [LOG-SUBMIT] Team has NO lead. Alerting Admins as catch-all...');
+                        await notifyAdmins({
+                            title: 'Unassigned Unit Submission 📋',
+                            body: `${req.user.name} submitted a log for "${team.name}", but the team has NO lead assigned.`,
+                            type: 'log',
+                            url: `/logs`
+                        });
+                    }
+                } else {
+                    console.log(`⚠️ [LOG-SUBMIT] Team ${doc.teamId} not found in directory.`);
+                }
+            } else {
+                console.log('⚠️ [LOG-SUBMIT] No teamId found for user. Skipping lead notification.');
+            }
+        }
+
         // Populate team info for frontend
         if (doc.teamId) {
             const db = getDB();
@@ -452,12 +503,74 @@ router.patch('/logs/:id', async (req, res) => {
  */
 router.post('/logs/:id/submit', async (req, res) => {
     try {
-        const result = await WorkLog.findOneAndUpdate(
-            { _id: parseObjectId(req.params.id, 'id'), userId: parseObjectId(req.user._id, '_id') },
+        const _id = parseObjectId(req.params.id, 'id');
+        const userId = parseObjectId(req.user._id, '_id');
+        const db = getDB();
+
+        const result = await db.collection('workLogs').findOneAndUpdate(
+            { _id, userId },
             { $set: { status: 'Pending Review', submittedAt: new Date(), updatedAt: new Date() } },
             { returnDocument: 'after' }
         );
+
         if (!result) return fail(res, 404, 'NOT_FOUND', 'Log not found.');
+
+        // FIRE AUTOMATED NOTIFICATIONS
+        const { sendSystemNotification, notifyAdmins } = require('../utils/notifications');
+
+        console.log(`📝 [LOG-SUBMIT-MANUAL] User: ${req.user.name} (${req.user.role}) | Log ID: ${_id}`);
+
+        if (req.user.role === ROLES.TEAM_LEAD) {
+            console.log('👷 [LOG-SUBMIT] Role is Team Lead. Notifying Admins...');
+            await notifyAdmins({
+                title: 'Unit Submission 📋',
+                body: `${req.user.name} (Lead) has submitted a work log for review.`,
+                type: 'log',
+                url: `/logs`
+            });
+        } else {
+            // Member/Volunteer submits -> Notify Unit Lead(s)
+            const teamId = result.teamId || req.user.teamId;
+            console.log(`👷 [LOG-SUBMIT] Role is Volunteer. Target Team ID: ${teamId}...`);
+
+            if (teamId) {
+                const team = await db.collection('teamDirectories').findOne({ _id: parseObjectId(teamId) });
+                if (team) {
+                    const leads = new Set();
+                    if (team.leadUserId) leads.add(String(team.leadUserId));
+                    if (Array.isArray(team.leadUserIds)) {
+                        team.leadUserIds.forEach(id => leads.add(String(id)));
+                    }
+
+                    console.log(`👷 [LOG-SUBMIT] Found Team: ${team.name} | Total Leads identified: ${leads.size}`);
+
+                    if (leads.size > 0) {
+                        for (const leadId of leads) {
+                            await sendSystemNotification(leadId, {
+                                title: 'New Log Submission 📝',
+                                body: `${req.user.name} submitted a new log: "${result.title}"`,
+                                type: 'log',
+                                url: `/logs`
+                            });
+                        }
+                    } else {
+                        // FALLBACK TO ADMINS
+                        console.log('👷 [LOG-SUBMIT] Team has NO lead. Alerting Admins as catch-all...');
+                        await notifyAdmins({
+                            title: 'Unassigned Unit Submission 📋',
+                            body: `${req.user.name} submitted a log for "${team.name}", but the team has NO lead assigned.`,
+                            type: 'log',
+                            url: `/logs`
+                        });
+                    }
+                } else {
+                    console.log(`⚠️ [LOG-SUBMIT] Team ${teamId} not found in directory.`);
+                }
+            } else {
+                console.log('⚠️ [LOG-SUBMIT] No teamId found in log or user profile.');
+            }
+        }
+
         return ok(res, result);
     } catch (error) {
         return fail(res, 400, 'VALIDATION_ERROR', error.message);
@@ -488,11 +601,23 @@ router.post('/logs/:id/approve', async (req, res) => {
         if (![ROLES.TEAM_LEAD, ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) {
             return fail(res, 403, 'FORBIDDEN', 'Insufficient permissions.');
         }
+
         const result = await WorkLog.findOneAndUpdate(
             { _id: parseObjectId(req.params.id, 'id') },
             { $set: { status: 'Completed', approvedAt: new Date(), approvedBy: parseObjectId(req.user._id, '_id'), revisionComment: req.body.comment || null, updatedAt: new Date() } },
             { returnDocument: 'after' }
         );
+
+        if (result) {
+            const { sendSystemNotification } = require('../utils/notifications');
+            await sendSystemNotification(result.userId, {
+                title: 'Log Approved! ✅',
+                body: `Your log "${result.title}" has been approved by ${req.user.name}.`,
+                type: 'approval',
+                url: `/logs`
+            });
+        }
+
         return ok(res, result);
     } catch (error) {
         return fail(res, 400, 'VALIDATION_ERROR', error.message);
@@ -533,6 +658,17 @@ router.post('/logs/:id/reject', async (req, res) => {
             { $set: { status: 'Needs Revision', revisionComment: req.body.comment, updatedAt: new Date() } },
             { returnDocument: 'after' }
         );
+
+        if (result) {
+            const { sendSystemNotification } = require('../utils/notifications');
+            await sendSystemNotification(result.userId, {
+                title: 'Revision Requested ⚠️',
+                body: `Action required on "${result.title}": ${req.body.comment}`,
+                type: 'revision',
+                url: `/logs`
+            });
+        }
+
         return ok(res, result);
     } catch (error) {
         return fail(res, 400, 'VALIDATION_ERROR', error.message);

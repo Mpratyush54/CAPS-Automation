@@ -105,17 +105,23 @@ router.patch('/teams/:id', async (req, res) => {
     if (!requireOrgAdmin(req, res)) return;
 
     const db = getDB();
+    const { name, type, focus, leadUserId, leadUserIds } = req.body;
+    
+    const upd = {
+        updatedAt: new Date()
+    };
+    
+    if (name) upd.name = name;
+    if (type) upd.type = type;
+    if (focus) upd.focus = focus;
+    
+    // Support both singular and plural lead fields
+    if (leadUserId !== undefined) upd.leadUserId = leadUserId ? parseObjectId(leadUserId) : null;
+    if (Array.isArray(leadUserIds)) upd.leadUserIds = leadUserIds.map(id => parseObjectId(id));
 
     const result = await db.collection('teamDirectories').findOneAndUpdate(
         { _id: parseObjectId(req.params.id) },
-        {
-            $set: {
-                name: req.body.name,
-                type: req.body.type,
-                focus: req.body.focus,
-                updatedAt: new Date()
-            }
-        },
+        { $set: upd },
         { returnDocument: 'after' }
     );
 
@@ -165,25 +171,35 @@ router.post('/teams/:id/members', async (req, res) => {
         );
     }
 
-    const result = await db.collection('teamDirectories').updateOne(
-        { _id: teamId },
-        {
-            $addToSet: { memberIds: userId },
-            $inc: { memberCount: 1 },
-            $set: { updatedAt: new Date() }
+    const updTeam = {
+        $addToSet: { memberIds: userId },
+        $inc: { memberCount: 1 },
+        $set: { updatedAt: new Date() }
+    };
+
+    const updUser = {
+        $set: { teamId: teamId, updatedAt: new Date() }
+    };
+
+    // If a role was provided, sync it
+    if (req.body.role) {
+        updUser.$set.role = req.body.role;
+        // If role is Team Lead, add to team leads list
+        if (req.body.role === 'Team Lead') {
+            if (!updTeam.$addToSet) updTeam.$addToSet = {};
+            updTeam.$addToSet.leadUserIds = userId;
+            // Also sync singular field for legacy support
+            updTeam.$set.leadUserId = userId; 
         }
-    );
+    }
+
+    const result = await db.collection('teamDirectories').updateOne({ _id: teamId }, updTeam);
 
     if (result.matchedCount === 0) {
         return fail(res, 404, 'TEAM_NOT_FOUND', 'Team not found.');
     }
 
-    await db.collection('users').updateOne(
-        { _id: userId },
-        {
-            $set: { teamId: teamId, updatedAt: new Date() }
-        }
-    );
+    await db.collection('users').updateOne({ _id: userId }, updUser);
 
     const team = await db.collection('teamDirectories').findOne({ _id: teamId });
 
@@ -227,10 +243,21 @@ router.delete('/teams/:id/members/:memberId', async (req, res) => {
 
 router.get('/users/all', async (req, res) => {
     const db = getDB();
+    const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role);
+    
+    let filter = { isActive: { $ne: false } };
+
+    // Security: Non-admins can only see members of their own team
+    if (!isAdmin) {
+        if (!req.user.teamId) {
+            return ok(res, { rows: [] }); // No team, no members to see
+        }
+        filter.teamId = parseObjectId(req.user.teamId);
+    }
 
     const rows = await db.collection('users')
-        .find({ isActive: { $ne: false } })
-        .project({ name: 1, email: 1, role: 1 })
+        .find(filter)
+        .project({ name: 1, email: 1, role: 1, teamId: 1 })
         .toArray();
 
     return ok(res, { rows });

@@ -4,36 +4,35 @@ const { authenticate } = require('../middleware/auth');
 const { asyncHandler, cacheResponse } = require('../middleware/api');
 const { ROLES, parseObjectId, getPeriodBounds } = require('../utils/worklog');
 const { ok } = require('../utils/api');
-const { cacheSet } = require('../config/redis');
+const { cacheSet, flushCache } = require('../config/redis');
 
 const router = express.Router();
 
 router.use(authenticate);
 
-/**
- * @swagger
- * /api/dashboard:
- *   get:
- *     summary: Get role-aware dashboard data for the signed-in user
- *     tags: [Dashboard]
- *     parameters:
- *       - in: query
- *         name: roleView
- *         schema:
- *           type: string
- *           enum: [auto, volunteer, team-lead, admin, super-admin]
- *       - in: query
- *         name: dateFrom
- *         schema: { type: string, format: date }
- *       - in: query
- *         name: dateTo
- *         schema: { type: string, format: date }
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
+/* -------------------- HELPERS -------------------- */
+
+// Returns an array of team IDs the user is authorized to oversee
+async function getAuthorizedTeamIds(db, user) {
+    if (user.role === ROLES.SUPER_ADMIN) return null; // Null means "All"
+    
+    if (!user.teamId) return [];
+
+    const userTeamId = parseObjectId(user.teamId, 'user.teamId');
+    const userTeam = await db.collection('teamDirectories').findOne({ _id: userTeamId });
+    if (!userTeam) return [userTeamId];
+
+    // If Admin/Super and it's a wing, include all child committees
+    if ((user.role === ROLES.ADMIN || user.role === ROLES.SUPER_ADMIN) && userTeam.type === 'wing') {
+        const children = await db.collection('teamDirectories')
+            .find({ wingId: userTeamId, isActive: { $ne: false } })
+            .project({ _id: 1 })
+            .toArray();
+        return [userTeamId, ...children.map(c => c._id)];
+    }
+
+    return [userTeamId];
+}
 
 async function getWeeklyChart(db, match) {
     const start = new Date();
@@ -72,55 +71,68 @@ async function countHours(db, match, period = 'weekly') {
     return { hours: Number((first.minutes / 60).toFixed(1)), logs: first.logs };
 }
 
+/* -------------------- ROUTE -------------------- */
+
 router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.query.roleView || 'auto'}:${req.query.dateFrom || ''}:${req.query.dateTo || ''}`, 300), asyncHandler(async (req, res) => {
     const db = getDB();
-    const userId = parseObjectId(req.user._id, '_id');
-    const role = req.user.role;
+    const user = req.user;
+    const userId = parseObjectId(user._id, '_id');
+    const role = user.role;
 
+    const authTeamIds = await getAuthorizedTeamIds(db, user);
+    const scopeMatch = authTeamIds ? { teamId: { $in: authTeamIds } } : {};
+
+    // ──────────────── VOLUNTEER ────────────────
     if (role === ROLES.VOLUNTEER) {
         const weekly = await countHours(db, { userId }, 'weekly');
         const assignedEventsCount = await db.collection('events').countDocuments({
-            $or: [{ committeeId: req.user.primaryCommitteeId || null }, { wingId: req.user.primaryWingId || null }],
+            $or: [
+                { teamId: user.teamId ? parseObjectId(user.teamId) : null },
+                { userId } // Events specifically assigned to them
+            ]
         });
         const weeklyHoursChart = await getWeeklyChart(db, { userId });
         const payload = {
             role,
-            hero: { greeting: 'Good morning', subtitle: 'Ready to log your work today?' },
+            hero: { greeting: 'Welcome Back', subtitle: 'Ready to log your work today?' },
             kpis: [
                 { key: 'myHoursWeek', label: 'My Hours (Week)', value: weekly.hours, unit: 'h' },
                 { key: 'myTaskCount', label: 'My Tasks', value: weekly.logs },
                 { key: 'assignedEventsCount', label: 'Events Assigned', value: assignedEventsCount },
             ],
-            sections: { 
-                myTasks: [], // For future implementation of a task management system
-                weeklyHoursChart 
-            },
+            sections: { myTasks: [], weeklyHoursChart },
         };
         await cacheSet(req.cacheKey, { data: payload }, req.cacheTTL || 300);
         return ok(res, payload);
     }
 
+    // ──────────────── TEAM LEAD ────────────────
     if (role === ROLES.TEAM_LEAD) {
-        const teamMembersCount = await db.collection('users').countDocuments({ primaryCommitteeId: req.user.primaryCommitteeId || null, isActive: { $ne: false } });
-        const teamHoursWeek = await countHours(db, { committeeId: req.user.primaryCommitteeId || null }, 'weekly');
-        const pendingApprovalsCount = await db.collection('workLogs').countDocuments({ committeeId: req.user.primaryCommitteeId || null, status: { $in: ['pending_review', 'Pending Review'] } });
-        const committeeHoursWeekChart = await getWeeklyChart(db, { committeeId: req.user.primaryCommitteeId || null });
+        const teamId = user.teamId ? parseObjectId(user.teamId) : null;
+        const teamMembersCount = await db.collection('users').countDocuments({ teamId, isActive: { $ne: false } });
+        const teamHoursWeek = await countHours(db, { teamId }, 'weekly');
+        const pendingApprovalsCount = await db.collection('workLogs').countDocuments({
+            teamId,
+            status: { $in: ['pending_review', 'Pending Review'] }
+        });
+        const committeeHoursWeekChart = await getWeeklyChart(db, { teamId });
         
         const teamLogsToday = await db.collection('workLogs').aggregate([
-            { $match: { committeeId: req.user.primaryCommitteeId || null, createdAt: { $gte: new Date(new Date().setUTCHours(0,0,0,0)) } } },
+            { $match: { teamId, createdAt: { $gte: new Date(new Date().setUTCHours(0,0,0,0)) } } },
             { $lookup: { from: 'users', localField: 'userId', foreignField: '_id', as: 'user' } },
             { $unwind: '$user' },
             { $project: { member: '$user.name', task: '$title', time: { $concat: [{ $toString: { $floor: { $divide: ['$durationMinutes', 60] } } }, 'h ', { $toString: { $mod: ['$durationMinutes', 60] } }, 'm'] }, status: '$status' } },
+            { $sort: { createdAt: -1 } },
             { $limit: 5 }
         ]).toArray();
 
         const payload = {
             role,
-            hero: { greeting: 'Good morning', subtitle: "Your team's daily report is waiting." },
+            hero: { greeting: 'Team Dashboard', subtitle: "Your team's performance at a glance." },
             kpis: [
                 { key: 'teamMembersCount', label: 'Team Members', value: teamMembersCount },
                 { key: 'teamHoursWeek', label: 'Team Hours (Week)', value: teamHoursWeek.hours, unit: 'h' },
-                { key: 'pendingApprovalsCount', label: 'Pending Approvals', value: pendingApprovalsCount },
+                { key: 'pendingTasksCount', label: 'Pending Approvals', value: pendingApprovalsCount },
                 { key: 'logsSubmittedCount', label: 'Logs Submitted', value: teamHoursWeek.logs },
             ],
             sections: { teamLogsToday, committeeHoursWeekChart },
@@ -129,64 +141,50 @@ router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.qu
         return ok(res, payload);
     }
 
-    if (role === ROLES.ADMIN) {
-        const wingId = req.user.primaryWingId || null;
-        const wingMembers = await db.collection('users').countDocuments({ primaryWingId: wingId, isActive: { $ne: false } });
-        const committeesCount = await db.collection('committees').countDocuments({ wingId, isActive: { $ne: false } });
-        const wingHoursWeek = await countHours(db, { wingId }, 'weekly');
-        const activeEvents = await db.collection('events').countDocuments({ wingId, status: { $in: ['upcoming', 'ongoing', 'Upcoming', 'Ongoing'] } });
+    // ──────────────── ADMIN / SUPER ADMIN ────────────────
+    if (role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) {
+        const membersCount = await db.collection('users').countDocuments({ ...scopeMatch, isActive: { $ne: false } });
+        const subUnitsCount = await db.collection('teamDirectories').countDocuments({ ...scopeMatch, isActive: { $ne: false } });
+        const orgHoursWeek = await countHours(db, scopeMatch, 'weekly');
+        const activeEvents = await db.collection('events').countDocuments({ ...scopeMatch, status: { $in: ['upcoming', 'ongoing', 'Upcoming', 'Ongoing'] } });
         
-        const committeePerformanceRows = await db.collection('workLogs').aggregate([
-            { $match: { wingId, status: { $in: ['approved', 'Completed'] } } },
-            { $group: { _id: '$committeeId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 } } },
-            { $lookup: { from: 'committees', localField: '_id', foreignField: '_id', as: 'committee' } },
-            { $unwind: { path: '$committee', preserveNullAndEmptyArrays: true } },
-            { $project: { wing: { $ifNull: ['$committee.name', 'Unassigned'] }, members: { $literal: 0 }, hours: { $round: ['$hours', 0] }, logs: 1, completion: { $literal: '100%' } } }
+        const performanceMatch = { ...scopeMatch, status: { $in: ['approved', 'Completed'] } };
+        const unitPerformanceRows = await db.collection('workLogs').aggregate([
+            { $match: performanceMatch },
+            { $group: { _id: '$teamId', hours: { $sum: { $divide: ['$durationMinutes', 60] } }, logs: { $sum: 1 } } },
+            { $lookup: { from: 'teamDirectories', localField: '_id', foreignField: '_id', as: 'unit' } },
+            { $unwind: { path: '$unit', preserveNullAndEmptyArrays: true } },
+            { $project: { 
+                wing: { $ifNull: ['$unit.name', 'Unassigned'] }, 
+                members: { $literal: 0 }, 
+                hours: { $round: ['$hours', 0] }, 
+                logs: 1, 
+                completion: { $literal: '100%' } 
+            } }
         ]).toArray();
+
+        const chart = await getWeeklyChart(db, scopeMatch);
 
         const payload = {
             role,
-            hero: { greeting: 'Good morning', subtitle: 'Wing performance and pending actions are ready.' },
+            hero: { greeting: role === ROLES.SUPER_ADMIN ? 'Organization HQ' : 'Wing Dashboard', subtitle: 'Overview of all activities and performance.' },
             kpis: [
-                { key: 'wingMembers', label: 'Wing Members', value: wingMembers },
-                { key: 'committeesCount', label: 'Committees', value: committeesCount },
-                { key: 'wingHoursWeek', label: 'Wing Hours (Week)', value: wingHoursWeek.hours, unit: 'h' },
-                { key: 'activeEvents', label: 'Active Events', value: activeEvents },
+                { key: role === ROLES.SUPER_ADMIN ? 'totalMembers' : 'wingMembers', label: 'Members', value: membersCount },
+                { key: role === ROLES.SUPER_ADMIN ? 'activeWings' : 'committeesCount', label: role === ROLES.SUPER_ADMIN ? 'Wings' : 'Committees', value: subUnitsCount },
+                { key: role === ROLES.SUPER_ADMIN ? 'totalHoursWeek' : 'wingHoursWeek', label: 'Hours (Week)', value: orgHoursWeek.hours, unit: 'h' },
+                { key: role === ROLES.SUPER_ADMIN ? 'globalEvents' : 'activeEvents', label: 'Active Events', value: activeEvents },
             ],
-            sections: { committeePerformanceRows },
+            sections: { 
+                unitPerformanceRows, 
+                organizationWideHoursWeekChart: chart,
+                wingOverviewRows: unitPerformanceRows // For backward compatibility with some UI views
+            },
         };
         await cacheSet(req.cacheKey, { data: payload }, req.cacheTTL || 300);
         return ok(res, payload);
     }
 
-    const totalMembers = await db.collection('users').countDocuments({ isActive: { $ne: false } });
-    const totalHoursWeek = await countHours(db, {}, 'weekly');
-    const activeWings = await db.collection('wings').countDocuments({ isActive: { $ne: false } });
-    const globalEvents = await db.collection('events').countDocuments({ status: { $in: ['upcoming', 'ongoing', 'Upcoming', 'Ongoing'] } });
-    const organizationWideHoursWeekChart = await getWeeklyChart(db, {});
-
-    const wingOverviewRows = await db.collection('workLogs').aggregate([
-        { $match: { status: { $in: ['approved', 'Completed'] } } },
-        { $group: { _id: '$wingId', hours: { $sum: { $divide: ['$durationMinutes', 60] } } } },
-        { $lookup: { from: 'wings', localField: '_id', foreignField: '_id', as: 'wing' } },
-        { $unwind: { path: '$wing', preserveNullAndEmptyArrays: true } },
-        { $project: { wing: { $ifNull: ['$wing.name', 'Unassigned'] }, members: { $literal: 0 }, completion: { $literal: '100%' } } }
-    ]).toArray();
-
-    const payload = {
-        role,
-        hero: { greeting: 'Good morning', subtitle: 'Organization-wide visibility is up to date.' },
-        kpis: [
-            { key: 'totalMembers', label: 'Total Members', value: totalMembers },
-            { key: 'totalHoursWeek', label: 'Total Hours (Week)', value: totalHoursWeek.hours, unit: 'h' },
-            { key: 'activeWings', label: 'Active Wings', value: activeWings },
-            { key: 'globalEvents', label: 'Global Events', value: globalEvents },
-        ],
-        sections: { organizationWideHoursWeekChart, wingOverviewRows },
-    };
-    await cacheSet(req.cacheKey, { data: payload }, req.cacheTTL || 300);
-    return ok(res, payload);
+    return fail(res, 400, 'INTERNAL_ERROR', 'Unknown role configuration.');
 }));
 
 module.exports = router;
-

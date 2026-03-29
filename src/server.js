@@ -8,9 +8,10 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
-const { connectDB, closeDB } = require('./config/database');
+const { connectDB, closeDB, getDB } = require('./config/database');
 const { initCollections } = require('./config/init');
-const { connectRedis, closeRedis, getRedis } = require('./config/redis');
+const { connectRedis, closeRedis, getRedis, cacheGet, cacheSet } = require('./config/redis');
+const { ObjectId } = require('mongodb');
 const Redis = require('ioredis');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { verifyToken } = require('./middleware/auth');
@@ -41,6 +42,8 @@ const dashboardRoutes = require('./routes/dashboard');
 const statsRoutes = require('./routes/stats');
 const organizationRoutes = require('./routes/organization');
 const profileRoutes = require('./routes/profile');
+const { startNotificationWorker } = require('./workers/notificationWorker');
+const { startPhotoSyncWorker } = require('./workers/photoSyncWorker');
 // const webhookRoutes = require('./routes/webhook');
 
 const swaggerUi = require('swagger-ui-express');
@@ -93,11 +96,18 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // ──────────────── Socket.IO Setup ────────────────
 const io = new Server(server, {
     cors: {
-        origin: [
-            process.env.FRONTEND_URL || 'http://localhost:5173',
-            'https://forum-gamma-one.vercel.app',
-            'http://localhost:3000',
-        ],
+        origin: (origin, callback) => {
+            const allowedOrigins = [
+                process.env.FRONTEND_URL || 'http://localhost:5174',
+                'https://forum-gamma-one.vercel.app',
+                'http://localhost:3000',
+            ];
+            if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.trycloudflare.com')) {
+                callback(null, true);
+            } else {
+                callback(new Error('CORS not allowed for this origin'));
+            }
+        },
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
         credentials: true,
     },
@@ -111,6 +121,9 @@ const io = new Server(server, {
         skipMiddlewares: true,
     },
 });
+
+// Initialize Socket Bridge for access from utilities
+require('./lib/socketBridge').setIO(io);
 
 
 // ──────────────── Redis Adapter (SCALING METRICS ENABLED) ────────────────
@@ -137,6 +150,38 @@ Promise.all([pubClient.connect(), subClient.connect()])
 
 // ──────────────── SOCKET CONNECTION MONITORING ────────────────
 io.on('connection', (socket) => {
+    const userId = socket.handshake.query.userId || socket.handshake.auth?.userId;
+    const fingerprint = socket.handshake.auth?.fingerprint;
+
+    if (userId) {
+        socket.join(`user:${userId}`);
+        const redis = getRedis();
+        if (redis) {
+            redis.set(`user:active:${userId}`, 'true', 'EX', 300); // Online for 5 mins
+        }
+
+        // Detailed Session Tracking ( Situational Awareness )
+        const { getDB } = require('./config/database');
+        const { ObjectId } = require('mongodb');
+        const db = getDB();
+
+        // Create initial session record
+        db.collection('userSessions').insertOne({
+            userId: new ObjectId(userId),
+            socketId: socket.id,
+            fingerprint: fingerprint || 'unknown',
+            startTime: new Date(),
+            status: 'active',
+            userAgent: socket.handshake.headers['user-agent'],
+            ip: socket.handshake.address
+        }).catch(err => console.error('Session Creation Error:', err.message));
+
+        // Update overall user presence
+        db.collection('users').updateOne(
+            { _id: new ObjectId(userId) },
+            { $set: { isOnline: true, lastActiveAt: new Date() } }
+        ).catch(err => console.error('Presence Update Error:', err.message));
+    }
 
     // Active socket count per pod
     if (activeSockets) {
@@ -147,6 +192,13 @@ io.on('connection', (socket) => {
     if (socketRooms) {
         socketRooms.set(io.sockets.adapter.rooms.size);
     }
+
+    // Heartbeat to keep activity alive
+    socket.on('heartbeat', () => {
+        if (userId && getRedis()) {
+            getRedis().set(`user:active:${userId}`, 'true', 'EX', 300);
+        }
+    });
 
     socket.onAny(() => {
         if (socketRooms) {
@@ -162,8 +214,27 @@ io.on('connection', (socket) => {
         if (socketRooms) {
             socketRooms.set(io.sockets.adapter.rooms.size);
         }
-    });
 
+        if (userId && getRedis()) {
+            getRedis().del(`user:active:${userId}`);
+
+            // Mark session as disconnected
+            const { getDB } = require('./config/database');
+            const { ObjectId } = require('mongodb');
+            const db = getDB();
+
+            db.collection('userSessions').updateOne(
+                { socketId: socket.id, status: 'active' },
+                { $set: { status: 'disconnected', endTime: new Date() } }
+            ).catch(err => console.error('Session Disconnect Error:', err.message));
+
+            // Overall Presence
+            db.collection('users').updateOne(
+                { _id: new ObjectId(userId) },
+                { $set: { isOnline: false } }
+            ).catch(err => console.error('Presence Update Error:', err.message));
+        }
+    });
 });
 
 
@@ -180,11 +251,18 @@ app.use(helmet());
 
 // ──────────────── CORS ────────────────
 app.use(cors({
-    origin: [
-        process.env.FRONTEND_URL || 'http://localhost:5173',
-        'https://forum-gamma-one.vercel.app',
-        'http://localhost:3000',
-    ],
+    origin: (origin, callback) => {
+        const allowedOrigins = [
+            process.env.FRONTEND_URL || 'http://localhost:5174',
+            'https://forum-gamma-one.vercel.app',
+            'http://localhost:3000',
+        ];
+        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.trycloudflare.com')) {
+            callback(null, true);
+        } else {
+            callback(new Error('CORS not allowed for this origin'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-bypass-token', 'x-api-key'],
@@ -279,6 +357,9 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-startServer();
+startServer().then(() => {
+    startNotificationWorker();
+    startPhotoSyncWorker();
+});
 
 module.exports = app;

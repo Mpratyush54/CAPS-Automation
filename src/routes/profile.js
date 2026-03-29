@@ -36,12 +36,36 @@ router.get('/me', async (req, res) => {
     const db = getDB();
     const userId = parseObjectId(req.user._id, '_id');
     const user = await db.collection('users').findOne({ _id: userId }, { projection: { password: 0 } });
-    const work = await db.collection('workLogs').aggregate([
+    
+    // 1. Calculate Work Stats
+    const workAgg = await db.collection('workLogs').aggregate([
         { $match: { userId } },
         { $group: { _id: null, minutes: { $sum: '$durationMinutes' }, logs: { $sum: 1 } } },
     ]).toArray();
-    const activity = await db.collection('activityLogs').find({ userId }).sort({ createdAt: -1 }).limit(10).toArray();
-    const first = work[0] || { minutes: 0, logs: 0 };
+    const stats = workAgg[0] || { minutes: 0, logs: 0 };
+
+    // 2. Fetch Mixed Activity (Audit Logs + Work Logs)
+    const [auditLogs, recentWork] = await Promise.all([
+        db.collection('activityLogs').find({ userId }).sort({ createdAt: -1 }).limit(10).toArray(),
+        db.collection('workLogs').find({ userId }).sort({ createdAt: -1 }).limit(10).toArray()
+    ]);
+
+    const combinedActivity = [
+        ...auditLogs.map(a => ({
+            id: a._id,
+            action: a.summary || a.action || 'Performed an action',
+            createdAt: a.createdAt,
+            type: a.entityType || 'audit'
+        })),
+        ...recentWork.map(w => ({
+            id: w._id,
+            action: `Logged work: ${w.title}`,
+            createdAt: w.createdAt,
+            type: 'worklog'
+        }))
+    ]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 10);
 
     return ok(res, {
         user: {
@@ -57,8 +81,13 @@ router.get('/me', async (req, res) => {
             avatarUrl: user.profile?.avatarUrl || null,
             role: user.role,
         },
-        summary: { hours: Number((first.minutes / 60).toFixed(2)), logs: first.logs },
-        recentActivity: activity.map((item) => ({ id: item._id, action: item.summary, timeLabel: item.createdAt, type: item.entityType })),
+        summary: { hours: Number((stats.minutes / 60).toFixed(2)), logs: stats.logs },
+        recentActivity: combinedActivity.map(a => ({
+            id: a.id,
+            action: a.action,
+            timeLabel: a.createdAt,
+            type: a.type
+        })),
         security: { twoFactorEnabled: Boolean(user.security?.twoFactorEnabled) },
     });
 });

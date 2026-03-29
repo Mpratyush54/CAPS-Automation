@@ -1,4 +1,7 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const { getDB } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler, requireRoles } = require('../middleware/api');
 const { ROLES, parseObjectId, parseDate, resolveScopedFields, buildScopeMatch } = require('../utils/worklog');
@@ -7,6 +10,7 @@ const { enqueue, QUEUES } = require('../utils/queue');
 const Event = require('../models/Event');
 const EventReport = require('../models/EventReport');
 const DriveFile = require('../models/DriveFile');
+const { getDriveClient } = require('../config/google');
 
 const router = express.Router();
 
@@ -51,61 +55,59 @@ router.use(authenticate);
  *         $ref: '#/components/responses/Forbidden'
  */
 router.post('/', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler(async (req, res) => {
+    const {
+        title, description, eventDate, date, startTime, time,
+        location, scope = 'global', status = 'Upcoming',
+        attendeeCount = 0, attendees, teamIds = []
+    } = req.body;
 
-        const { title, description, eventDate, date, startTime, time, location, scope = 'global', status = 'Upcoming', attendeeCount = 0, attendees, wingId, committeeId } = req.body;
-        if (!title || !(eventDate || date)) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'title and date are required.');
-        }
+    if (!title || !(eventDate || date)) {
+        return fail(res, 400, 'VALIDATION_ERROR', 'title and date are required.');
+    }
 
-        const scoped = resolveScopedFields(req.user, { wingId, committeeId });
-        const doc = {
-            title: String(title).trim(),
-            description: description ? String(description).trim() : '',
-            eventDate: parseDate(eventDate || date, 'eventDate'),
-            startTime: String(startTime || time || ''),
-            location: location ? String(location).trim() : '',
-            wingId: scoped.wingId,
-            committeeId: scoped.committeeId,
-            scopeSource: scoped.scopeSource,
-            scope,
-            status,
-            createdBy: parseObjectId(req.user._id, '_id'),
-            attendeeCount: Number(attendeeCount || attendees || 0),
-            assignedRoleVisibility: ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'],
-            photoSync: {
-                provider: 'google_drive',
-                folderId: null,
-                folderUrl: null,
-                status: 'pending',
-            },
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        };
+    const doc = {
+        title: String(title).trim(),
+        description: description ? String(description).trim() : '',
+        eventDate: parseDate(eventDate || date, 'eventDate'),
+        startTime: String(startTime || time || ''),
+        location: location ? String(location).trim() : '',
+        teamIds: teamIds.map(id => parseObjectId(id, 'teamIds')),
+        scope,
+        status,
+        createdBy: parseObjectId(req.user._id, '_id'),
+        attendeeCount: Number(attendeeCount || attendees || 0),
+        assignedRoleVisibility: ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'],
+        photoSync: {
+            provider: 'google_drive',
+            folderId: null,
+            folderUrl: null,
+            status: 'pending',
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    };
 
-        const result = await Event.insertOne(doc);
-        doc._id = result.insertedId;
-        created(res, doc);
+    const result = await Event.insertOne(doc);
+    doc._id = result.insertedId;
+    created(res, doc);
 }));
 
-/**
- * @swagger
- * /api/events:
- *   get:
- *     summary: List events visible to the current user
- *     tags: [Events]
- *     responses:
- *       200:
- *         $ref: '#/components/responses/PaginatedOk'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
 router.get('/', async (req, res) => {
     try {
         const { page, pageSize, skip } = parsePagination(req.query);
-        const filter = buildScopeMatch(req.user, { allowSelf: true, userField: 'createdBy' });
+        const filter = {};
+
+        // Security Scope: Super Admin sees all. Others see what they created or where their team is involved.
+        if (req.user.role !== ROLES.SUPER_ADMIN) {
+            const userFilters = [{ createdBy: parseObjectId(req.user._id) }];
+            if (req.user.teamId) {
+                userFilters.push({ teamIds: parseObjectId(req.user.teamId) });
+            }
+            filter.$or = userFilters;
+        }
+
         if (req.query.status) filter.status = req.query.status;
+
         const total = await Event.countDocuments(filter);
         const items = await Event.find(filter).sort({ eventDate: -1 }).skip(skip).limit(pageSize).toArray();
         ok(res, { rows: items }, { page, pageSize, total });
@@ -185,6 +187,8 @@ router.patch('/:id', async (req, res) => {
         if (req.body.location !== undefined) update.location = req.body.location;
         if (req.body.status !== undefined) update.status = req.body.status;
         if (req.body.attendees !== undefined || req.body.attendeeCount !== undefined) update.attendeeCount = Number(req.body.attendees || req.body.attendeeCount || 0);
+        if (req.body.teamIds !== undefined) update.teamIds = req.body.teamIds.map(id => parseObjectId(id, 'teamIds'));
+
         const result = await Event.findOneAndUpdate({ _id }, { $set: update }, { returnDocument: 'after' });
         return ok(res, result);
     } catch (error) {
@@ -223,23 +227,23 @@ router.delete('/:id', async (req, res) => {
  *         $ref: '#/components/responses/Forbidden'
  */
 router.put('/:id/report', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler(async (req, res) => {
-        const eventId = parseObjectId(req.params.id, 'id');
-        const result = await EventReport.findOneAndUpdate(
-            { eventId },
-            {
-                $set: {
-                    eventId,
-                    summary: req.body.summary || '',
-                    status: req.body.status || 'Draft',
-                    ownerUserId: parseObjectId(req.user._id, '_id'),
-                    lastUpdatedAt: new Date(),
-                    updatedAt: new Date(),
-                },
-                $setOnInsert: { createdAt: new Date() },
+    const eventId = parseObjectId(req.params.id, 'id');
+    const result = await EventReport.findOneAndUpdate(
+        { eventId },
+        {
+            $set: {
+                eventId,
+                summary: req.body.summary || '',
+                status: req.body.status || 'Draft',
+                ownerUserId: parseObjectId(req.user._id, '_id'),
+                lastUpdatedAt: new Date(),
+                updatedAt: new Date(),
             },
-            { upsert: true, returnDocument: 'after' }
-        );
-        return ok(res, result);
+            $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true, returnDocument: 'after' }
+    );
+    return ok(res, result);
 }));
 
 /**
@@ -262,12 +266,12 @@ router.put('/:id/report', requireRoles('Team Lead', 'Admin', 'Super Admin'), asy
  *         $ref: '#/components/responses/Forbidden'
  */
 router.post('/:id/report/publish', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler(async (req, res) => {
-        const result = await EventReport.findOneAndUpdate(
-            { eventId: parseObjectId(req.params.id, 'id') },
-            { $set: { status: 'Published', publishedAt: new Date(), publishedBy: parseObjectId(req.user._id, '_id'), updatedAt: new Date() } },
-            { returnDocument: 'after' }
-        );
-        return ok(res, result);
+    const result = await EventReport.findOneAndUpdate(
+        { eventId: parseObjectId(req.params.id, 'id') },
+        { $set: { status: 'Published', publishedAt: new Date(), publishedBy: parseObjectId(req.user._id, '_id'), updatedAt: new Date() } },
+        { returnDocument: 'after' }
+    );
+    return ok(res, result);
 }));
 
 /**
@@ -309,71 +313,81 @@ router.post('/:id/report/publish', requireRoles('Team Lead', 'Admin', 'Super Adm
  *         $ref: '#/components/responses/NotFound'
  */
 router.post('/:id/photos/upload-url', asyncHandler(async (req, res) => {
-        const eventId = parseObjectId(req.params.id, 'id');
-        const event = await Event.findOne({ _id: eventId });
+    const eventId = parseObjectId(req.params.id, 'id');
+    const event = await Event.findOne({ _id: eventId });
 
-        if (!event) {
-            return res.status(404).json({ error: 'Event not found.' });
-        }
+    if (!event) return fail(res, 404, 'NOT_FOUND', 'Event not found.');
 
-        const files = Array.isArray(req.body.files) ? req.body.files : [];
-        if (files.length === 0) {
-            return res.status(400).json({ error: 'files are required.' });
-        }
+    const files = Array.isArray(req.body.files) ? req.body.files : [];
+    if (files.length === 0) return fail(res, 400, 'VALIDATION_ERROR', 'files are required.');
 
-        const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-        const existingToday = await DriveFile.countDocuments({
+    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    const existingToday = await DriveFile.countDocuments({
+        uploadedBy: parseObjectId(req.user._id, '_id'),
+        createdAt: { $gte: new Date(Date.now() - (24 * 60 * 60 * 1000)) },
+    });
+
+    if (existingToday + files.length > 50) {
+        return fail(res, 429, 'RATE_LIMIT', 'Daily upload limit (50 photos) exceeded.');
+    }
+
+    const docs = files.map((file) => {
+        if (!allowedTypes.has(file.mimeType)) throw new Error(`mimeType ${file.mimeType} is not allowed.`);
+        if (Number(file.sizeBytes || 0) > 10 * 1024 * 1024) throw new Error(`file ${file.fileName} exceeds 10MB.`);
+
+        return {
+            eventId,
             uploadedBy: parseObjectId(req.user._id, '_id'),
-            createdAt: { $gte: new Date(Date.now() - (24 * 60 * 60 * 1000)) },
-        });
+            googleFileId: null,
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            sizeBytes: Number(file.sizeBytes || 0),
+            folderId: event.photoSync?.folderId || null,
+            status: 'pending_upload',
+            createdAt: new Date(),
+        };
+    });
 
-        if (existingToday + files.length > 25) {
-            return res.status(429).json({ error: 'Daily upload limit exceeded.' });
-        }
+    await DriveFile.collection().insertMany(docs);
 
-        const docs = files.map((file) => {
-            if (!allowedTypes.has(file.mimeType)) {
-                throw new Error(`mimeType ${file.mimeType} is not allowed.`);
-            }
-            if (Number(file.sizeBytes || 0) > 10 * 1024 * 1024) {
-                throw new Error(`file ${file.fileName} exceeds the 10MB size cap.`);
-            }
+    created(res, {
+        items: docs.map((doc) => ({
+            fileName: doc.fileName,
+            status: doc.status,
+            uploadUrl: `/api/events/${eventId.toString()}/photos/content`
+        }))
+    });
+}));
 
-            return {
-                eventId,
-                uploadedBy: parseObjectId(req.user._id, '_id'),
-                googleFileId: null,
-                fileName: file.fileName,
-                mimeType: file.mimeType,
-                sizeBytes: Number(file.sizeBytes || 0),
-                folderId: event.photoSync?.folderId || null,
-                status: 'uploaded',
-                createdAt: new Date(),
-            };
-        });
+router.post('/:id/photos/content', asyncHandler(async (req, res) => {
+    const eventId = parseObjectId(req.params.id, 'id');
+    const { fileName, content } = req.body; // content is base64
 
-        await DriveFile.collection().insertMany(docs);
-        await Event.updateOne(
-            { _id: eventId },
-            { $set: { 'photoSync.status': 'syncing', updatedAt: new Date() } }
-        );
-        const queue = await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
-            eventId: eventId.toString(),
-            uploadedBy: String(req.user._id),
-            files: docs.map((doc) => ({ fileName: doc.fileName, mimeType: doc.mimeType, sizeBytes: doc.sizeBytes })),
-        });
+    if (!fileName || !content) return fail(res, 400, 'VALIDATION_ERROR', 'fileName and content are required.');
 
-        created(res, {
-            queued: true,
-            queue,
-            items: docs.map((doc) => ({
-                fileName: doc.fileName,
-                mimeType: doc.mimeType,
-                sizeBytes: doc.sizeBytes,
-                status: doc.status,
-                uploadUrl: `/api/events/${eventId.toString()}/photos`,
-            })),
-        });
+    const uploadDir = path.join(__dirname, '../../temp/uploads', String(eventId));
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+    const filePath = path.join(uploadDir, fileName);
+    fs.writeFileSync(filePath, content, 'base64');
+
+    const fileMeta = await DriveFile.findOneAndUpdate(
+        { eventId, fileName, status: 'pending_upload' },
+        { $set: { status: 'ready_to_sync', updatedAt: new Date(), localPath: filePath } },
+        { returnDocument: 'after' }
+    );
+
+    if (!fileMeta) return fail(res, 404, 'NOT_FOUND', 'Upload intent not found or already processed.');
+
+    await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
+        eventId: eventId.toString(),
+        photoId: String(fileMeta._id),
+        fileName,
+        localPath: filePath,
+        uploadedBy: String(req.user._id),
+    });
+
+    ok(res, { success: true, fileName });
 }));
 
 /**
@@ -396,12 +410,122 @@ router.post('/:id/photos/upload-url', asyncHandler(async (req, res) => {
 router.get('/:id/photos', async (req, res) => {
     try {
         const eventId = parseObjectId(req.params.id, 'id');
-        const items = await DriveFile.find({ eventId }).sort({ createdAt: -1 }).toArray();
-        ok(res, { rows: items });
+        const db = getDB();
+
+        const items = await db.collection('driveFiles')
+            .find({ eventId })
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        // Get uploader names
+        const userIds = [...new Set(items.map(i => i.uploadedBy))].filter(Boolean);
+        const users = await db.collection('users')
+            .find({ _id: { $in: userIds } })
+            .project({ name: 1 })
+            .toArray();
+        const userMap = users.reduce((acc, u) => ({ ...acc, [String(u._id)]: u.name }), {});
+
+        const enriched = items.map(p => ({
+            ...p,
+            uploadedByName: userMap[String(p.uploadedBy)] || 'Unknown',
+            // construct display URL using our local proxy (CF Cacheable)
+            displayUrl: p.googleFileId ? `/api/events/${req.params.id}/photos/${p._id}/view` : (p.folderUrl || null)
+        }));
+
+        ok(res, { rows: enriched });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
 });
+
+router.get('/:id/photos/summary', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler(async (req, res) => {
+    const eventId = parseObjectId(req.params.id, 'id');
+    const db = getDB();
+
+    const photos = await db.collection('driveFiles')
+        .find({ eventId })
+        .project({ uploadedBy: 1, teamId: 1 })
+        .toArray();
+
+    // Get user details for names
+    const userIds = [...new Set(photos.map(p => String(p.uploadedBy)))].map(id => parseObjectId(id));
+    const users = await db.collection('users')
+        .find({ _id: { $in: userIds } })
+        .project({ name: 1, role: 1, teamId: 1 })
+        .toArray();
+
+    // Get team names
+    const teamIds = [...new Set(users.map(u => String(u.teamId)).filter(Boolean))].map(id => parseObjectId(id));
+    const teams = await db.collection('teamDirectories')
+        .find({ _id: { $in: teamIds } })
+        .project({ name: 1 })
+        .toArray();
+
+    const userMap = users.reduce((acc, u) => ({ ...acc, [String(u._id)]: u }), {});
+    const teamMap = teams.reduce((acc, t) => ({ ...acc, [String(t._id)]: t }), {});
+
+    // People-wise
+    const people = Object.values(photos.reduce((acc, p) => {
+        const uid = String(p.uploadedBy);
+        if (!acc[uid]) {
+            acc[uid] = {
+                userId: uid,
+                name: userMap[uid]?.name || 'Unknown',
+                role: userMap[uid]?.role || 'Volunteer',
+                teamName: teamMap[String(userMap[uid]?.teamId)]?.name || 'No Team',
+                count: 0
+            };
+        }
+        acc[uid].count++;
+        return acc;
+    }, {}));
+
+    // Team-wise
+    const teamCounts = Object.values(photos.reduce((acc, p) => {
+        const user = userMap[String(p.uploadedBy)];
+        if (!user || !user.teamId) return acc;
+        const tid = String(user.teamId);
+        if (!acc[tid]) {
+            acc[tid] = {
+                teamId: tid,
+                name: teamMap[tid]?.name || 'Unknown Team',
+                count: 0
+            };
+        }
+        acc[tid].count++;
+        return acc;
+    }, {}));
+
+    return ok(res, { people, teams: teamCounts });
+}));
+
+router.post('/:id/photos/track', asyncHandler(async (req, res) => {
+    const eventId = parseObjectId(req.params.id, 'id');
+    const { googleFileId, fileName, mimeType, sizeBytes } = req.body;
+
+    if (!googleFileId || !fileName) {
+        return fail(res, 400, 'VALIDATION_ERROR', 'googleFileId and fileName are required.');
+    }
+
+    const event = await Event.findOne({ _id: eventId });
+    if (!event) return fail(res, 404, 'NOT_FOUND', 'Event not found.');
+
+    const doc = {
+        eventId,
+        uploadedBy: parseObjectId(req.user._id, '_id'),
+        googleFileId,
+        fileName,
+        mimeType: mimeType || 'image/jpeg',
+        sizeBytes: Number(sizeBytes || 0),
+        folderId: event.photoSync?.folderId || null,
+        status: 'synced', // Already in Drive
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    };
+
+    const result = await DriveFile.insertOne(doc);
+    ok(res, { tracked: true, id: result.insertedId });
+}));
 
 /**
  * @swagger
@@ -427,18 +551,69 @@ router.get('/:id/photos', async (req, res) => {
  *         $ref: '#/components/responses/Forbidden'
  */
 router.post('/:id/photos/:photoId/retry-sync', requireRoles('Admin', 'Super Admin'), asyncHandler(async (req, res) => {
-        const result = await DriveFile.findOneAndUpdate(
-            { _id: parseObjectId(req.params.photoId, 'photoId'), eventId: parseObjectId(req.params.id, 'id') },
-            { $set: { status: 'Pending Sync', updatedAt: new Date() }, $inc: { retryCount: 1 } },
-            { returnDocument: 'after' }
-        );
-        const queue = await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
-            eventId: req.params.id,
-            photoId: req.params.photoId,
-            retry: true,
-            triggeredBy: String(req.user._id),
-        });
-        return ok(res, { item: result, queue });
+    const result = await DriveFile.findOneAndUpdate(
+        { _id: parseObjectId(req.params.photoId, 'photoId'), eventId: parseObjectId(req.params.id, 'id') },
+        { $set: { status: 'Pending Sync', updatedAt: new Date() }, $inc: { retryCount: 1 } },
+        { returnDocument: 'after' }
+    );
+    const queue = await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
+        eventId: req.params.id,
+        photoId: req.params.photoId,
+        retry: true,
+        triggeredBy: String(req.user._id),
+    });
+    return ok(res, { item: result, queue });
 }));
 
 module.exports = router;
+
+/**
+ * Image Proxy Route (Cloudflare Cacheable)
+ * Fetches content from Google Drive and streams it with high-TTL cache headers.
+ */
+router.get('/:id/photos/:photoId/view', async (req, res) => {
+    try {
+        const photoId = parseObjectId(req.params.photoId, 'photoId');
+        const db = getDB();
+        const drive = getDriveClient();
+
+        if (!drive) {
+            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Google Drive service not initialized');
+        }
+
+        const photo = await db.collection('driveFiles').findOne({ _id: photoId });
+        if (!photo) return fail(res, 404, 'NOT_FOUND', 'Photo not found');
+
+        // Cache strategy: 7 days
+        res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400');
+        res.setHeader('Content-Type', 'image/jpeg');
+
+        // 1. If we have a local path and the sync to Drive hasn't finished (or failed), serve local
+        if (photo.localPath && fs.existsSync(photo.localPath)) {
+            console.log(`[proxy] Serving local file: ${photo.localPath}`);
+            return fs.createReadStream(photo.localPath).pipe(res);
+        }
+
+        // 2. If synced to Drive, stream from Google
+        if (photo.googleFileId) {
+            console.log(`[proxy] Streaming from Google Drive: ${photo.googleFileId}`);
+            const driveRes = await drive.files.get(
+                { fileId: photo.googleFileId, alt: 'media' },
+                { responseType: 'stream' }
+            );
+
+            return driveRes.data
+                .on('error', (err) => {
+                    console.error('[proxy] stream error:', err.message);
+                    if (!res.headersSent) res.status(500).end();
+                })
+                .pipe(res);
+        }
+
+        return fail(res, 404, 'NOT_FOUND', 'Media asset not available.');
+
+    } catch (error) {
+        console.error('[proxy] error:', error.message);
+        if (!res.headersSent) fail(res, 500, 'SERVER_ERROR', error.message);
+    }
+});
