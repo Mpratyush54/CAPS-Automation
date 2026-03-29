@@ -1,17 +1,32 @@
 import { useEffect, useState } from 'react';
-import { Bell, BellOff, Send, CheckCheck, Info, AlertTriangle, Calendar, Check, X, ChevronRight, Loader2 } from 'lucide-react';
+import { Bell, BellOff, Send, CheckCheck, Info, AlertTriangle, Calendar, Check, X, ChevronRight, Loader2, ShieldAlert, FileText, CheckCircle, HelpCircle, ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
-import { ROLES, can } from '../rbac';
 import { api, getErrorMessage, unwrap } from '../lib/api';
 import { normalizeNotification } from '../lib/adapters';
+import { socket } from '../lib/socket';
 
-const typeIcon = { info: Info, event: Calendar, success: Check, warning: AlertTriangle };
+const typeIcon = {
+  info: Info,
+  event: Calendar,
+  success: Check,
+  warning: AlertTriangle,
+  security: ShieldAlert,
+  log: FileText,
+  approval: CheckCircle,
+  revision: HelpCircle
+};
+
 const typeStyle = {
-  info: { bg: 'var(--color-primary-fixed)', color: 'var(--color-primary)', label: 'Info' },
-  event: { bg: 'var(--color-secondary-fixed)', color: '#4e3397', label: 'Event' },
+  info: { bg: 'rgba(232, 234, 255, 1)', color: 'var(--color-primary)', label: 'Info' },
+  event: { bg: 'rgba(238, 232, 255, 1)', color: '#4e3397', label: 'Event' },
   success: { bg: '#d1fae5', color: '#059669', label: 'Success' },
   warning: { bg: '#fef3c7', color: '#d97706', label: 'Warning' },
+  security: { bg: '#fee2e2', color: '#dc2626', label: 'Security' },
+  log: { bg: 'rgba(232, 234, 255, 1)', color: 'var(--color-primary)', label: 'Log' },
+  approval: { bg: '#dcfce7', color: '#16a34a', label: 'Approval' },
+  revision: { bg: '#ffedd5', color: '#ea580c', label: 'Revision' }
 };
 
 const Modal = ({ title, onClose, children, maxWidth = '560px' }) => (
@@ -27,6 +42,7 @@ const Modal = ({ title, onClose, children, maxWidth = '560px' }) => (
 );
 
 const DetailModal = ({ notification, onClose, onMarkRead }) => {
+  const navigate = useNavigate();
   const Icon = typeIcon[notification.type] || Info;
   const style = typeStyle[notification.type] || typeStyle.info;
 
@@ -53,8 +69,215 @@ const DetailModal = ({ notification, onClose, onMarkRead }) => {
         </div>
       </div>
       <div className="card-action-row" style={{ marginTop: '1.5rem', justifyContent: 'flex-end' }}>
+        {notification.url && (
+          <button className="btn-primary" onClick={() => { navigate(notification.url); onClose(); }}>
+            View Context <ArrowRight size={14} />
+          </button>
+        )}
         {!notification.read && <button className="btn-ghost" onClick={() => { onMarkRead(notification.id); onClose(); }}><Check size={14} /> Mark Read</button>}
         <button className="btn-secondary" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
+  );
+};
+
+const ComposeModal = ({ onClose, onSend, role: userRole }) => {
+  const [form, setForm] = useState({
+    title: '',
+    body: '',
+    type: 'info',
+    audienceType: 'all',
+    targetRole: '',
+    recipientUserIds: [],
+  });
+  const [users, setUsers] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const isAdmin = ['Admin', 'Super Admin'].includes(userRole);
+
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const res = await api.get('/api/organization/users/all');
+        const rows = unwrap(res).rows || [];
+        setUsers(rows);
+      } catch (e) {
+        console.error('Failed to load users', e);
+      }
+    };
+    loadUsers();
+  }, []);
+
+  const handleSend = async () => {
+    setLoading(true);
+    try {
+      await onSend(form);
+      onClose();
+    } catch {} finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredUsers = users.filter(u => 
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const toggleRecipient = (userId) => {
+    setForm(prev => {
+      const exists = prev.recipientUserIds.includes(userId);
+      return {
+        ...prev,
+        recipientUserIds: exists 
+          ? prev.recipientUserIds.filter(id => id !== userId)
+          : [...prev.recipientUserIds, userId]
+      };
+    });
+  };
+
+  return (
+    <Modal title="Send New Notification" onClose={onClose}>
+      <div style={{ display: 'grid', gap: '1rem', maxHeight: '75vh', overflowY: 'auto', paddingRight: '0.5rem' }}>
+        <div>
+          <label className="input-label">Target Audience</label>
+          <select 
+            className="input-field"
+            value={form.audienceType === 'specific_role' ? `role:${form.targetRole}` : form.audienceType}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val.startsWith('role:')) {
+                setForm({ ...form, audienceType: 'specific_role', targetRole: val.split(':')[1] });
+              } else {
+                setForm({ ...form, audienceType: val, targetRole: '' });
+              }
+            }}
+          >
+            {isAdmin && (
+              <>
+                <option value="all">Entire Organization</option>
+                <option value="role:Volunteer">All Volunteers</option>
+                <option value="role:Team Lead">All Team Leads</option>
+                <option value="role:Admin">All Admins</option>
+              </>
+            )}
+            <option value="team">My Unit / Team Members</option>
+            <option value="specific_member">Selected Individual(s)</option>
+          </select>
+        </div>
+
+        {form.audienceType === 'specific_member' && (
+          <div style={{ background: 'var(--color-surface-low)', padding: '1rem', borderRadius: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ position: 'relative' }}>
+              <input 
+                className="input-field" 
+                placeholder="Search by name or email..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ marginBottom: '0.5rem' }}
+              />
+            </div>
+            
+            <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {filteredUsers.slice(0, 100).map(u => {
+                const isSelected = form.recipientUserIds.includes(u._id);
+                return (
+                  <div 
+                    key={u._id} 
+                    onClick={() => toggleRecipient(u._id)}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '0.5rem', 
+                      padding: '0.5rem', 
+                      borderRadius: '0.5rem', 
+                      cursor: 'pointer',
+                      background: isSelected ? 'var(--color-primary-fixed)' : 'transparent',
+                      border: isSelected ? '1px solid var(--color-primary)' : '1px solid transparent'
+                    }}
+                  >
+                    <div style={{ width: '1rem', height: '1rem', border: '1px solid var(--color-outline)', borderRadius: '0.25rem', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isSelected ? 'var(--color-primary)' : 'white' }}>
+                      {isSelected && <Check size={10} color="white" />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600 }}>{u.name}</p>
+                      <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>{u.role} • {u.email}</p>
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredUsers.length === 0 && <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--color-outline)', padding: '1rem' }}>No users found.</p>}
+            </div>
+
+            {form.recipientUserIds.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--color-surface-variant)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+                <p style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-primary)' }}>Selected ({form.recipientUserIds.length})</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.375rem' }}>
+                  {form.recipientUserIds.map(id => {
+                    const u = users.find(x => x._id === id);
+                    if (!u) return null;
+                    return (
+                      <div key={id} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', background: 'var(--color-surface-variant)', padding: '0.2rem 0.5rem', borderRadius: '1rem', fontSize: '0.7rem' }}>
+                        {u.name}
+                        <X size={10} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); toggleRecipient(id); }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          <div>
+            <label className="input-label">Title</label>
+            <input 
+              className="input-field" 
+              placeholder="e.g. Activity Sync" 
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="input-label">Alert Type</label>
+            <select 
+              className="input-field"
+              value={form.type}
+              onChange={(e) => setForm({ ...form, type: e.target.value })}
+            >
+              <option value="info">Information</option>
+              <option value="warning">Warning / Alert</option>
+              <option value="success">Success / Milestone</option>
+              <option value="revision">Revision Needed</option>
+              <option value="approval">Final Approval</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="input-label">Message Details</label>
+          <textarea 
+            className="input-field" 
+            rows={4} 
+            placeholder="Type your message here..."
+            value={form.body}
+            onChange={(e) => setForm({ ...form, body: e.target.value })}
+            style={{ resize: 'none' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <button className="btn-ghost" style={{ flex: 1 }} onClick={onClose} disabled={loading}>Cancel</button>
+          <button 
+            className="btn-primary" 
+            style={{ flex: 2 }}
+            onClick={handleSend} 
+            disabled={loading || !form.title || !form.body || (form.audienceType === 'specific_member' && form.recipientUserIds.length === 0)}
+          >
+            {loading ? <Loader2 size={16} className="spin" /> : <Send size={16} />} 
+            Dispatch to {form.audienceType === 'specific_member' ? `${form.recipientUserIds.length} Person(s)` : 'Audience'}
+          </button>
+        </div>
       </div>
     </Modal>
   );
@@ -65,8 +288,11 @@ const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState('all');
   const [detail, setDetail] = useState(null);
+  const [compose, setCompose] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const canCompose = ['Team Lead', 'Admin', 'Super Admin'].includes(role);
 
   useEffect(() => {
     let mounted = true;
@@ -87,7 +313,18 @@ const Notifications = () => {
       }
     };
     loadNotifications();
-    return () => { mounted = false; };
+
+    // LISTEN FOR REAL-TIME NOTIFICATIONS
+    const handleNewNotif = (data) => {
+      setNotifications(prev => [normalizeNotification(data), ...prev]);
+    };
+
+    socket.on('notification:new', handleNewNotif);
+
+    return () => {
+      mounted = false;
+      socket.off('notification:new', handleNewNotif);
+    };
   }, [filter]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -97,14 +334,24 @@ const Notifications = () => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     try {
       await api.patch(`/api/notifications/${id}/read`, { read: true });
-    } catch {}
+    } catch { }
   };
 
   const markAllRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     try {
       await api.patch('/api/notifications/read-all', {});
-    } catch {}
+    } catch { }
+  };
+
+  const sendNotification = async (payload) => {
+    setError(null);
+    try {
+      await api.post('/api/notifications', payload);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to send notification.'));
+      throw err;
+    }
   };
 
   return (
@@ -122,9 +369,16 @@ const Notifications = () => {
               </button>
             ))}
           </div>
-          {unreadCount > 0 && (
-            <button className="btn-secondary" onClick={markAllRead}><CheckCheck size={14} /> Mark all read</button>
-          )}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {unreadCount > 0 && (
+              <button className="btn-ghost" onClick={markAllRead}><CheckCheck size={14} /> Clear All</button>
+            )}
+            {canCompose && (
+              <button className="btn-primary" onClick={() => setCompose(true)}>
+                <Send size={14} /> Send Notification
+              </button>
+            )}
+          </div>
         </div>
 
         {loading && notifications.length === 0 ? (
@@ -159,6 +413,7 @@ const Notifications = () => {
         )}
 
         {detail && <DetailModal notification={detail} onClose={() => setDetail(null)} onMarkRead={markRead} />}
+        {compose && <ComposeModal role={role} onClose={() => setCompose(false)} onSend={sendNotification} />}
       </div>
     </>
   );

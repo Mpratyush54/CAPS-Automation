@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   PlusCircle, Search, Edit2, Trash2, Clock, CheckCircle,
   Eye, X, Save, XCircle, AlertCircle, Info, Send, Loader2, Activity
@@ -268,6 +269,7 @@ const ConfirmDelete = ({ log, onConfirm, onClose }) => (
 /* -------------------- MAIN PAGE -------------------- */
 
 const Logs = () => {
+  const location = useLocation();
   const { role, user } = useAuthStore();
   const [logs, setLogs] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -277,6 +279,15 @@ const Logs = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [modal, setModal] = useState(null);
+
+  // Deep Link Support: If URL has ?search=..., apply it
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const s = params.get('search');
+    if (s) {
+      setSearch(decodeURIComponent(s));
+    }
+  }, [location.search]);
 
   useEffect(() => {
     const loadOrg = async () => {

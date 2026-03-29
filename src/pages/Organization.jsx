@@ -298,8 +298,8 @@ const Organization = () => {
   const addMember = async (user, userRole) => {
     if (!selectedId) return;
     try {
-      // 1. Add to the team member list and update user's teamId
-      await api.post(`/api/organization/teams/${selectedId}/members`, { userId: user.id });
+      // 1. Add to the team member list and update user's researchRole
+      await api.post(`/api/organization/teams/${selectedId}/members`, { userId: user.id, role: userRole });
 
       setMemberModalOpen(false);
       loadTeams();

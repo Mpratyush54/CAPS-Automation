@@ -82,6 +82,8 @@ export const normalizeNotification = (item) => ({
   from: item.from || item.fromLabel || 'System',
   role: item.role || item.fromRoleLabel || 'System',
   audience: item.audience || item.audienceLabel || 'You',
+  url: item.url || null,
+  meta: item.meta || {},
 });
 
 export const normalizeTeam = (team) => {

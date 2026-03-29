@@ -7,7 +7,7 @@ import {
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES } from '../rbac';
-import { api, getErrorMessage, unwrap } from '../lib/api';
+import { api, getErrorMessage, unwrap, formatDateTimeLabel } from '../lib/api';
 
 const fallbackDashboard = {
   volunteer: {
@@ -375,7 +375,10 @@ const normalizeDashboard = (role, payload) => {
         { ...base.kpis[2], value: values.pendingTasksCount?.value ?? base.kpis[2].value },
         { ...base.kpis[3], value: values.logsSubmittedCount?.value ?? base.kpis[3].value },
       ],
-      teamLogsToday: sections.teamLogsToday || base.teamLogsToday,
+      teamLogsToday: (sections.teamLogsToday || base.teamLogsToday).map(log => ({
+        ...log,
+        time: formatDateTimeLabel(log.time)
+      })),
       committeeHoursWeekChart: (sections.committeeHoursWeekChart || base.committeeHoursWeekChart).map((row) => ({ day: row.day, hours: row.hours ?? row.hrs ?? 0 })),
     };
   }

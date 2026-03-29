@@ -7,6 +7,9 @@ import {
 import Sidebar from './components/Sidebar';
 import { useAuthStore } from './store/auth';
 import { hasMinRole, getNavItems, ROLES } from './rbac';
+import { initSocket, disconnectSocket } from './lib/socket';
+import { getDeviceFingerprint } from './lib/device';
+import { api } from './lib/api';
 
 // Lazy-loaded pages
 const Login        = lazy(() => import('./pages/Login'));
@@ -20,6 +23,8 @@ const Notifications= lazy(() => import('./pages/Notifications'));
 const Profile      = lazy(() => import('./pages/Profile'));
 
 const NAV_ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell, FileText };
+
+import { registerCurrentDevice } from './lib/notifications';
 
 /* ── Guards ──────────────────────────────────────────────────── */
 const ProtectedRoute = ({ children }) => {
@@ -100,6 +105,22 @@ const AppLayout = ({ children }) => (
 
 /* ── App ─────────────────────────────────────────────────────── */
 function App() {
+  const { user, token } = useAuthStore();
+
+  useEffect(() => {
+    if (token && user?._id) {
+      initSocket(user._id);
+
+      // Explicitly handle device enrollment on session start
+      registerCurrentDevice(false).catch(err => {
+        console.warn('Initial device registration failed (may require explicit user permission):', err.message);
+      });
+    } else {
+      disconnectSocket();
+    }
+    return () => disconnectSocket();
+  }, [token, user?._id]);
+
   return (
     <BrowserRouter>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

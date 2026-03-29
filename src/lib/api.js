@@ -32,6 +32,20 @@ export const formatDateInput = (value) => {
   return date.toISOString().slice(0, 10);
 };
 
+export const formatDateTimeLabel = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+};
+
 export const formatDateTime = (date, time = '00:00') => {
   if (!date) return null;
   return `${date}T${time || '00:00'}:00.000Z`;

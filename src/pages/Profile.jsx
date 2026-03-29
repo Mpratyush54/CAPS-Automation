@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Camera, Edit2, Save, X, Clock, CheckCircle2, Calendar, Shield, Loader2 } from 'lucide-react';
+import { Camera, Edit2, Save, X, Clock, CheckCircle2, Calendar, Shield, Loader2, Smartphone, Trash2 } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
-import { api, getErrorMessage, unwrap } from '../lib/api';
+import { api, getErrorMessage, unwrap, formatDateTimeLabel } from '../lib/api';
+import { registerCurrentDevice } from '../lib/notifications';
+import { getDeviceFingerprint } from '../lib/device';
 
 const Profile = () => {
   const { user, role, setUser } = useAuthStore();
   const [serverActivity, setServerActivity] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [stats, setStats] = useState({ hours: '0', logs: '0' });
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const currentFingerprint = getDeviceFingerprint();
   
   const [form, setForm] = useState({
     name: user?.name || '',
@@ -24,47 +28,70 @@ const Profile = () => {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  const loadProfile = async () => {
+    setLoading(true);
+    try {
+      const [profRes, devRes] = await Promise.all([
+        api.get('/api/profile/me'),
+        api.get('/api/notifications/devices')
+      ]);
+      const payload = unwrap(profRes) || {};
+      const deviceData = unwrap(devRes) || {};
+      
+      const nextUser = payload.user || {};
+      setForm({
+        name: nextUser.name || '',
+        email: nextUser.email || '',
+        phone: nextUser.phone || '',
+        wing: nextUser.wing || '',
+        committee: nextUser.committee || '',
+        joinDate: nextUser.joinDate?.slice(0, 10) || '',
+        bio: nextUser.bio || '',
+      });
+      
+      setStats({
+        hours: String(payload.summary?.hours || 0),
+        logs: String(payload.summary?.logs || 0),
+      });
+      
+      setDevices(deviceData.devices || []);
+      
+      setServerActivity((payload.recentActivity || []).map(a => ({
+         action: a.action || 'Activity',
+         time: formatDateTimeLabel(a.timeLabel),
+         type: a.type || 'log'
+      })));
+      
+      setError(null);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load profile.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    let mounted = true;
-    const loadProfile = async () => {
-      setLoading(true);
-      try {
-        const response = await api.get('/api/profile/me');
-        const payload = unwrap(response) || {};
-        if (!mounted) return;
-        
-        const nextUser = payload.user || {};
-        setForm({
-          name: nextUser.name || '',
-          email: nextUser.email || '',
-          phone: nextUser.phone || '',
-          wing: nextUser.wing || '',
-          committee: nextUser.committee || '',
-          joinDate: nextUser.joinDate?.slice(0, 10) || '',
-          bio: nextUser.bio || '',
-        });
-        
-        setStats({
-          hours: String(payload.summary?.hours || 0),
-          logs: String(payload.summary?.logs || 0),
-        });
-        
-        setServerActivity((payload.recentActivity || []).map(a => ({
-          action: a.action || 'Activity',
-          time: a.timeLabel || '',
-          type: a.type || 'log'
-        })));
-        
-        setError(null);
-      } catch (err) {
-        if (mounted) setError(getErrorMessage(err, 'Failed to load profile.'));
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
     loadProfile();
-    return () => { mounted = false; };
   }, []);
+
+  const handleSyncDevice = async () => {
+    try {
+        await registerCurrentDevice(true);
+        await loadProfile();
+        // Show success briefly
+    } catch (err) {
+        setError(err.message);
+    }
+  };
+
+  const removeDevice = async (id) => {
+    try {
+      await api.delete(`/api/notifications/devices/${id}`);
+      setDevices(prev => prev.filter(d => d._id !== id));
+    } catch (err) {
+      setError(getErrorMessage(err, 'Could not unregister device.'));
+    }
+  };
 
   const handleSave = async () => {
     setError(null);
@@ -89,7 +116,7 @@ const Profile = () => {
       <div className="page-body">
         {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', borderRadius: '0.625rem' }}>{error}</div>}
         
-        <div className="profile-layout" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div className="profile-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 350px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
           <div className="profile-sidebar" style={{ display: 'grid', gap: '1.5rem' }}>
             <div className="card" style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
               <div style={{ position: 'relative', display: 'inline-block', marginBottom: '1rem' }}>
@@ -112,6 +139,49 @@ const Profile = () => {
                   <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>{stats.logs}</p>
                   <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>Total Logs</p>
                 </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="card-flex-between" style={{ marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, fontSize: '0.875rem', fontWeight: 700 }}>Connected Devices</h3>
+                <button 
+                    className="btn-ghost" 
+                    onClick={handleSyncDevice}
+                    style={{ fontSize: '0.6875rem', padding: '0.25rem 0.5rem' }}
+                >
+                    Sync This Device
+                </button>
+              </div>
+              <div style={{ display: 'grid', gap: '0.875rem' }}>
+                {devices.map((dev) => {
+                  const isThisDevice = dev.fingerprint === currentFingerprint;
+                  return (
+                    <div key={dev._id} style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.75rem', 
+                        padding: '0.5rem', 
+                        background: 'var(--color-surface-low)', 
+                        borderRadius: '0.625rem',
+                        border: isThisDevice ? '1px solid var(--color-primary-fixed-dim)' : 'none'
+                    }}>
+                        <div style={{ width: '2rem', height: '2rem', borderRadius: '0.4rem', background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Smartphone size={14} style={{ color: isThisDevice ? 'var(--color-primary)' : 'var(--color-outline)' }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: '0.8125rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {dev.deviceName} {isThisDevice && <span style={{ fontSize: '0.625rem', color: 'var(--color-primary)', fontWeight: 400 }}>(Current)</span>}
+                        </p>
+                        <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-outline)' }}>{dev.platform} • {dev.type === 'web-push' ? 'Real Push' : 'Simple'}</p>
+                        </div>
+                        <button className="btn-ghost" onClick={() => removeDevice(dev._id)} style={{ padding: '0.25rem', color: 'var(--color-error)' }}><Trash2 size={13} /></button>
+                    </div>
+                  );
+                })}
+                {devices.length === 0 && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-outline)', textAlign: 'center', margin: '0.5rem 0' }}>No push-enabled devices found.</p>
+                )}
               </div>
             </div>
 
