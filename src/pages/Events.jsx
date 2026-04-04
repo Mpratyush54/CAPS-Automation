@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Calendar, Camera, Edit2, Eye, FileText, ImagePlus, Info, Lock, MapPin, PlusCircle, Save, Trash2, Users, X, AlertCircle } from 'lucide-react';
+import { Calendar, Camera, Edit2, Eye, FileText, ImagePlus, Info, Lock, MapPin, PlusCircle, Save, Trash2, Users, X, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
-import { api, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
+import { api, API_BASE_URL, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
 import { normalizeEvent } from '../lib/adapters';
+import { Loader2 } from 'lucide-react';
 
 const statusColors = { upcoming: 'badge-primary', ongoing: 'badge-warning', completed: 'badge-success' };
 
@@ -21,30 +22,30 @@ const Modal = ({ title, onClose, children, maxWidth = '760px' }) => (
 );
 
 const EventFormModal = ({ initial, role, teams, onClose, onSave }) => {
-  const [form, setForm] = useState({ 
-    title: initial?.title || '', 
-    date: initial?.date || '', 
-    time: initial?.time || '', 
-    location: initial?.location || '', 
-    teamIds: initial?.teamIds || (initial?.teamId ? [initial.teamId] : []), 
-    attendees: initial?.attendees || '', 
-    description: initial?.description || '', 
-    status: (initial?.status || 'upcoming').toLowerCase() 
+  const [form, setForm] = useState({
+    title: initial?.title || '',
+    date: initial?.date || '',
+    time: initial?.time || '',
+    location: initial?.location || '',
+    teamIds: initial?.teamIds || (initial?.teamId ? [initial.teamId] : []),
+    attendees: initial?.attendees || '',
+    description: initial?.description || '',
+    status: (initial?.status || 'upcoming').toLowerCase()
   });
   const [searchTerm, setSearchTerm] = useState('');
   const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave({ 
-      ...form, 
-      id: initial?.id, 
-      attendees: Number(form.attendees) || 0 
+    onSave({
+      ...form,
+      id: initial?.id,
+      attendees: Number(form.attendees) || 0
     });
     onClose();
   };
 
-  const filteredTeams = teams.filter(t => 
+  const filteredTeams = teams.filter(t =>
     t.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -53,7 +54,7 @@ const EventFormModal = ({ initial, role, teams, onClose, onSave }) => {
       const exists = prev.teamIds.includes(teamId);
       return {
         ...prev,
-        teamIds: exists 
+        teamIds: exists
           ? prev.teamIds.filter(id => id !== teamId)
           : [...prev.teamIds, teamId]
       };
@@ -70,12 +71,12 @@ const EventFormModal = ({ initial, role, teams, onClose, onSave }) => {
           <div><label className="input-label">Status</label><select className="input-field" value={form.status} onChange={(e) => set('status', e.target.value)}>{['upcoming', 'ongoing', 'completed'].map((status) => <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>)}</select></div>
         </div>
         <div><label className="input-label">Location</label><input className="input-field" value={form.location} onChange={(e) => set('location', e.target.value)} /></div>
-        
+
         <div style={{ background: 'var(--color-surface-low)', padding: '1rem', borderRadius: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <label className="input-label" style={{ marginBottom: 0 }}>Assigned Teams / Units</label>
-          <input 
-            className="input-field" 
-            placeholder="Search teams..." 
+          <input
+            className="input-field"
+            placeholder="Search teams..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -83,12 +84,12 @@ const EventFormModal = ({ initial, role, teams, onClose, onSave }) => {
             {filteredTeams.map(t => {
               const isSelected = form.teamIds.includes(t._id);
               return (
-                <div 
-                  key={t._id} 
+                <div
+                  key={t._id}
                   onClick={() => toggleTeam(t._id)}
-                  style={{ 
-                    padding: '0.375rem 0.625rem', 
-                    cursor: 'pointer', 
+                  style={{
+                    padding: '0.375rem 0.625rem',
+                    cursor: 'pointer',
                     fontSize: '0.8125rem',
                     background: isSelected ? 'var(--color-primary-fixed)' : 'transparent',
                     color: isSelected ? 'var(--color-primary)' : 'var(--color-on-surface)',
@@ -129,12 +130,305 @@ const EventFormModal = ({ initial, role, teams, onClose, onSave }) => {
   );
 };
 
+const FilePreview = ({ file, progress, onRemove, disabled }) => {
+  const [url, setUrl] = useState(null);
+  const isDone = progress === 100;
+
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+
+  if (!url) return null;
+
+  return (
+    <div className="card" style={{ padding: '0.25rem', position: 'relative', overflow: 'hidden', height: '110px', transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}>
+      <img src={url} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '0.375rem', opacity: isDone ? 0.4 : 1 }} />
+      {disabled && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '0.75rem', fontWeight: 700 }}>
+          {progress || 0}%
+        </div>
+      )}
+      {!disabled && (
+        <button onClick={onRemove} style={{ position: 'absolute', top: 2, right: 2, background: 'var(--color-error)', border: 'none', color: '#fff', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 5 }}>
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+};
+const PhotoItem = ({ photo, onClick }) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [thumbUrl, setThumbUrl] = useState(null);
+  const displayUrl = photo?.displayUrl || '';
+  const src = displayUrl.startsWith('http') ? displayUrl : `${API_BASE_URL}${displayUrl}`;
+  const isSyncing = !displayUrl;
+
+  useEffect(() => {
+    if (!displayUrl) return;
+    let active = true;
+    const loadThumb = async () => {
+      try {
+        const response = await api.get(src, { responseType: 'blob' });
+        if (!active) return;
+        const url = URL.createObjectURL(response.data);
+        setThumbUrl(url);
+        setLoading(false);
+      } catch (err) {
+        if (active) {
+          console.error('Thumb load failed', err);
+          setError(true);
+          setLoading(false);
+        }
+      }
+    };
+    loadThumb();
+    return () => {
+      active = false;
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    };
+  }, [src]);
+
+  return (
+    <div 
+      className="card" 
+      onClick={() => !loading && !error && !isSyncing && onClick(photo)} 
+      style={{ 
+        padding: '0.25rem', 
+        position: 'relative', 
+        overflow: 'hidden', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        cursor: (loading || error || isSyncing) ? 'default' : 'zoom-in',
+        transform: 'translateZ(0)', 
+        backfaceVisibility: 'hidden',
+        contain: 'strict',
+        height: '220px',
+        willChange: 'transform'
+      }}
+    >
+      <div style={{ position: 'relative', aspectRatio: '1', width: '100%', overflow: 'hidden', borderRadius: '0.375rem', background: 'var(--color-surface-low)' }}>
+        {(loading || isSyncing) && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+            gap: '0.5rem',
+            background: 'var(--color-surface-low)'
+          }}>
+            <Loader2 className="animate-spin" size={20} style={{ color: 'var(--color-primary)', opacity: 0.6 }} />
+            {isSyncing && <span style={{ fontSize: '0.625rem', fontWeight: 700, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Syncing</span>}
+          </div>
+        )}
+        {!isSyncing && thumbUrl && (
+          <img
+            src={error ? 'https://via.placeholder.com/180?text=Error' : thumbUrl}
+            alt={photo.fileName}
+            decoding="async"
+            loading="lazy"
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              transition: 'opacity 0.25s ease-in-out',
+              transform: 'translateZ(0)', 
+              backfaceVisibility: 'hidden'
+            }}
+          />
+        )}
+      </div>
+      <div style={{ padding: '0.4rem 0.25rem 0.25rem', fontSize: '0.7rem' }}>
+        <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-on-surface)' }}>{photo.fileName}</div>
+        <div style={{ opacity: 0.7, color: 'var(--color-on-surface-variant)' }}>{isSyncing ? 'Processing asset...' : `By ${photo.uploadedByName || 'User'}`}</div>
+      </div>
+    </div>
+  );
+};
+
+const Lightbox = ({ photo, onNext, onPrev, hasNext, hasPrev, onClose }) => {
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
+  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [blobUrl, setBlobUrl] = useState(null);
+  const displayUrl = photo?.displayUrl || '';
+  const src = displayUrl.startsWith('http') ? displayUrl : `${API_BASE_URL}${displayUrl}`;
+
+  useEffect(() => {
+    if (!displayUrl) return;
+    let active = true;
+    const loadLargeImage = async () => {
+      setLoading(true);
+      setProgress(0);
+      try {
+        const response = await api.get(src, {
+          responseType: 'blob',
+          onDownloadProgress: (e) => {
+            if (e.total && active) {
+              setProgress(Math.round((e.loaded / e.total) * 100));
+            }
+          }
+        });
+        
+        if (!active) return;
+        const url = URL.createObjectURL(response.data);
+        setBlobUrl(url);
+      } catch (err) {
+        console.error('Failed to load high-res image', err);
+        // Fallback or error state
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadLargeImage();
+    return () => { 
+      active = false; 
+      if (blobUrl) URL.revokeObjectURL(blobUrl); 
+    };
+  }, [src]);
+
+  const handleImageLoad = (e) => {
+    setNaturalSize({ w: e.target.naturalWidth, h: e.target.naturalHeight });
+  };
+
+  const handleZoom = (e) => {
+    e.stopPropagation();
+    if (scale === 1) {
+      setScale(2.5);
+      const { left, top, width: containerW, height: containerH } = e.currentTarget.parentElement.getBoundingClientRect();
+      const xPct = (e.clientX - left) / containerW;
+      const yPct = (e.clientY - top) / containerH;
+      setTranslate({ x: (0.5 - xPct) * (containerW * 1.5), y: (0.5 - yPct) * (containerH * 1.5) });
+    } else {
+      setScale(1);
+      setTranslate({ x: 0, y: 0 });
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    if (scale === 1 || !naturalSize.w) return;
+    const { width: containerW, height: containerH, left, top } = e.currentTarget.parentElement.getBoundingClientRect();
+    const containerRatio = containerW / containerH;
+    const imageRatio = naturalSize.w / naturalSize.h;
+    let dispW, dispH;
+    if (imageRatio > containerRatio) { dispW = containerW; dispH = containerW / imageRatio; }
+    else { dispW = containerH * imageRatio; dispH = containerH; }
+
+    const maxTX = (dispW * (scale - 1)) / 2;
+    const maxTY = (dispH * (scale - 1)) / 2;
+    const targetX = (0.5 - (e.clientX - left) / containerW) * (dispW * (scale - 1));
+    const targetY = (0.5 - (e.clientY - top) / containerH) * (dispH * (scale - 1));
+
+    setTranslate({
+      x: Math.max(-maxTX, Math.min(maxTX, targetX)),
+      y: Math.max(-maxTY, Math.min(maxTY, targetY))
+    });
+  };
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'ArrowRight' && hasNext) { onNext(); setScale(1); setTranslate({ x: 0, y: 0 }); }
+      if (e.key === 'ArrowLeft' && hasPrev) { onPrev(); setScale(1); setTranslate({ x: 0, y: 0 }); }
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [hasNext, hasPrev, onNext, onPrev, onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 110, background: 'rgba(0,0,0,0.98)', backdropFilter: 'blur(20px)', padding: 0 }}>
+      {loading && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', gap: '1rem', flexDirection: 'column', zIndex: 120 }}>
+          <div style={{ position: 'relative', width: '64px', height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Loader2 className="animate-spin" size={48} style={{ opacity: 0.2 }} />
+            <div style={{ position: 'absolute', fontSize: '0.75rem', fontWeight: 700 }}>{progress}%</div>
+            <svg style={{ position: 'absolute', transform: 'rotate(-90deg)', width: '64px', height: '64px' }}>
+              <circle cx="32" cy="32" r="28" fill="none" stroke="var(--color-primary)" strokeWidth="4" strokeDasharray="175.9" strokeDashoffset={175.9 - (175.9 * progress) / 100} style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
+            </svg>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '0.9375rem', fontWeight: 600 }}>Downloading High Resolution</div>
+            <div style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '0.25rem' }}>Large file support enabled (up to 100MB)</div>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation Layer */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.5rem', pointerEvents: 'none', zIndex: 125 }}>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onPrev(); setScale(1); setTranslate({ x: 0, y: 0 }); }} 
+          disabled={!hasPrev}
+          style={{ pointerEvents: 'auto', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: hasPrev ? 'pointer' : 'default', opacity: hasPrev ? 1 : 0, borderRadius: '50%', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', backdropFilter: 'blur(8px)' }}
+        >
+          <ChevronLeft size={32} />
+        </button>
+
+        <button 
+          onClick={(e) => { e.stopPropagation(); onNext(); setScale(1); setTranslate({ x: 0, y: 0 }); }} 
+          disabled={!hasNext}
+          style={{ pointerEvents: 'auto', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: hasNext ? 'pointer' : 'default', opacity: hasNext ? 1 : 0, borderRadius: '50%', width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', backdropFilter: 'blur(8px)' }}
+        >
+          <ChevronRight size={32} />
+        </button>
+      </div>
+
+      <button onClick={onClose} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', borderRadius: '50%', width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 135, pointerEvents: 'auto' }}>
+        <X size={20} />
+      </button>
+      
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {blobUrl && (
+          <img 
+            src={blobUrl} 
+            key={photo._id}
+            alt={photo.fileName} 
+            crossOrigin="anonymous"
+            onLoad={handleImageLoad}
+            onClick={handleZoom}
+            onMouseMove={handleMouseMove}
+            style={{ 
+              maxWidth: '100%', 
+              maxHeight: '100%', 
+              objectFit: 'contain', 
+              transition: scale === 1 ? 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s' : 'transform 0.15s ease-out', 
+              transform: `scale(${scale}) translate3d(${translate.x / scale}px, ${translate.y / scale}px, 0)`,
+              cursor: scale === 1 ? 'zoom-in' : 'zoom-out',
+              opacity: loading ? 0 : 1,
+              pointerEvents: 'auto',
+              willChange: 'transform'
+            }} 
+          />
+        )}
+      </div>
+      
+      {!loading && (
+        <div style={{ position: 'absolute', bottom: '2rem', left: '0', right: '0', textAlign: 'center', color: '#fff', pointerEvents: 'none', zIndex: 120 }}>
+          <div style={{ fontSize: '1.125rem', fontWeight: 600, textShadow: '0 2px 8px rgba(0,0,0,0.8)', marginBottom: '0.375rem' }}>{photo.fileName}</div>
+          <div style={{ fontSize: '0.8125rem', opacity: 0.8, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', display: 'inline-block', padding: '0.375rem 1rem', borderRadius: '9999px', backdropFilter: 'blur(10px)' }}>
+            Uploaded by {photo.uploadedByName} • Click to zoom • Move to pan
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 const EventWorkspace = ({ event, role, user, onClose }) => {
   const [photos, setPhotos] = useState([]);
+  const [viewingPhoto, setViewingPhoto] = useState(null);
   const [summary, setSummary] = useState({ people: [], teams: [] });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('gallery');
   const [uploading, setUploading] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState([]); // [File objects]
+  const [uploadProgress, setUploadProgress] = useState({}); // { fileName: percentage }
   const fileInputRef = useRef();
 
   const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.TEAM_LEAD].includes(role);
@@ -157,10 +451,23 @@ const EventWorkspace = ({ event, role, user, onClose }) => {
 
   useEffect(() => { loadData(); }, [event.id]);
 
-  const handleUpload = async (e) => {
+  const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
+    setSelectedFiles(prev => [...prev, ...files]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeSelectedFile = (index) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const startUpload = async () => {
+    if (!selectedFiles.length) return;
     setUploading(true);
+    setUploadProgress({});
+    
+    const files = [...selectedFiles];
     try {
       // Step 1: Request upload metadata (Bulk)
       const payload = {
@@ -170,29 +477,43 @@ const EventWorkspace = ({ event, role, user, onClose }) => {
           sizeBytes: f.size
         }))
       };
-      
+
       const { items } = unwrap(await api.post(`/api/events/${event.id}/photos/upload-url`, payload));
-      
-      // Step 2: Upload each file's content
+
+      // Step 2: Stream each file
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const item = items[i];
+        const rawUrl = item?.uploadUrl || '';
+        if (!rawUrl) continue;
+        const uploadUrl = rawUrl.startsWith('http') ? rawUrl : `${API_BASE_URL}${rawUrl}`;
         
-        // Convert to base64 for transmission via JSON (simplified for current environment)
-        const reader = new FileReader();
-        const base64Promise = new Promise((resolve) => {
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.readAsDataURL(file);
-        });
-        const base64 = await base64Promise;
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PATCH', uploadUrl);
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+          xhr.setRequestHeader('x-offset', '0');
+          xhr.setRequestHeader('Authorization', `Bearer ${localStorage.getItem('authToken')}`);
 
-        await api.post(`/api/events/${event.id}/photos/content`, {
-          fileName: item.fileName,
-          content: base64
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const pct = Math.round((e.loaded / e.total) * 100);
+              setUploadProgress(prev => ({ ...prev, [file.name]: pct }));
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`Upload failed: ${xhr.statusText}`));
+          };
+          xhr.onerror = () => reject(new Error('Network error during upload'));
+          xhr.send(file);
         });
       }
-      
+
       loadData();
+      setSelectedFiles([]);
+      setUploadProgress({});
       setActiveTab('gallery');
     } catch (err) {
       alert('Upload failed: ' + getErrorMessage(err));
@@ -217,28 +538,44 @@ const EventWorkspace = ({ event, role, user, onClose }) => {
             {photos.length === 0 ? (
               <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', opacity: 0.5 }}>No photos yet. Be the first to upload!</div>
             ) : photos.map(p => (
-              <div key={p._id} className="card" style={{ padding: '0.25rem', position: 'relative' }}>
-                <img 
-                  src={p.displayUrl || 'https://via.placeholder.com/180'} 
-                  alt={p.fileName}
-                  style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: '0.375rem' }} 
-                  onError={(e) => { e.target.src = 'https://via.placeholder.com/180?text=Syncing...'; }}
-                />
-                <div style={{ padding: '0.25rem', fontSize: '0.7rem' }}>
-                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.fileName}</div>
-                  <div style={{ opacity: 0.7 }}>By {p.uploadedByName || 'User'}</div>
-                </div>
-              </div>
+              <PhotoItem key={p._id} photo={p} onClick={setViewingPhoto} />
             ))}
           </div>
         ) : activeTab === 'upload' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', border: '2px dashed var(--color-outline)', borderRadius: '1rem', gap: '1rem' }}>
-            <ImagePlus size={48} style={{ opacity: 0.3 }} />
-            <p style={{ fontSize: '0.875rem', opacity: 0.7 }}>Select photos to upload to this event</p>
-            <input type="file" multiple accept="image/*" ref={fileInputRef} style={{ display: 'none' }} onChange={handleUpload} />
-            <button className="btn-primary" onClick={() => fileInputRef.current.click()} disabled={uploading}>
-              {uploading ? 'Uploading...' : 'Choose Files'}
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '180px', border: '2px dashed var(--color-outline)', borderRadius: '1rem', gap: '1rem', background: 'var(--color-surface-low)', cursor: 'pointer' }} onClick={() => !uploading && fileInputRef.current.click()}>
+              <ImagePlus size={40} style={{ opacity: 0.3, color: 'var(--color-primary)' }} />
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: '0.875rem', fontWeight: 600 }}>Click or drag to add photos</p>
+                <p style={{ fontSize: '0.7rem', opacity: 0.5 }}>Up to 100MB per file</p>
+              </div>
+              <input type="file" multiple accept="image/*" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileSelect} disabled={uploading} />
+            </div>
+
+            {selectedFiles.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '0.75rem' }}>
+                  {selectedFiles.map((file, idx) => (
+                    <FilePreview 
+                      key={`${file.name}-${idx}`} 
+                      file={file} 
+                      progress={uploadProgress[file.name]} 
+                      disabled={uploading} 
+                      onRemove={() => removeSelectedFile(idx)} 
+                    />
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--color-surface-high)', padding: '1rem', borderRadius: '0.75rem' }}>
+                  <div style={{ fontSize: '0.8125rem' }}>
+                    <span style={{ fontWeight: 700 }}>{selectedFiles.length}</span> photos selected
+                  </div>
+                  <button className="btn-primary" onClick={startUpload} disabled={uploading || selectedFiles.length === 0}>
+                    {uploading ? 'Uploading...' : 'Start Upload'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -270,6 +607,22 @@ const EventWorkspace = ({ event, role, user, onClose }) => {
           </div>
         )}
       </div>
+      {viewingPhoto && (
+        <Lightbox 
+          photo={viewingPhoto} 
+          onClose={() => setViewingPhoto(null)} 
+          onNext={() => {
+            const idx = photos.findIndex(p => p._id === viewingPhoto._id);
+            if (idx < photos.length - 1) setViewingPhoto(photos[idx + 1]);
+          }}
+          onPrev={() => {
+            const idx = photos.findIndex(p => p._id === viewingPhoto._id);
+            if (idx > 0) setViewingPhoto(photos[idx - 1]);
+          }}
+          hasNext={photos.findIndex(p => p._id === viewingPhoto._id) < photos.length - 1}
+          hasPrev={photos.findIndex(p => p._id === viewingPhoto._id) > 0}
+        />
+      )}
     </Modal>
   );
 };
@@ -278,7 +631,7 @@ const EventCard = ({ event, role, teams, onWorkspace, onEdit, onDelete }) => {
   const canManage = can(role, 'manageCommitteeEvents');
   const canDelete = can(role, 'createWingEvent');
   const status = (event.status || 'upcoming').toLowerCase();
-  
+
   // Resolve team names
   const teamNames = (event.teamIds || []).map(id => {
     const t = teams.find(x => x._id === String(id));
@@ -363,17 +716,17 @@ const Events = () => {
       const isEdit = !!next.id;
       const endpoint = isEdit ? `/api/events/${next.id}` : '/api/events';
       const method = isEdit ? 'patch' : 'post';
-      
+
       const payload = {
         ...next,
         eventDate: formatDateTime(next.date, next.time),
       };
-      
+
       const response = await api[method](endpoint, payload);
       const saved = normalizeEvent(unwrap(response));
-      
-      setEvents(prev => isEdit 
-        ? prev.map(e => e.id === saved.id ? saved : e) 
+
+      setEvents(prev => isEdit
+        ? prev.map(e => e.id === saved.id ? saved : e)
         : [saved, ...prev]
       );
       setCreate(false);
@@ -437,7 +790,7 @@ const Events = () => {
         {createModal && <EventFormModal teams={teams} role={role} onClose={() => setCreate(false)} onSave={saveEvent} />}
         {editModal && <EventFormModal initial={editModal} teams={teams} role={role} onClose={() => setEdit(null)} onSave={saveEvent} />}
         {workspaceEvent && <EventWorkspace event={workspaceEvent} role={role} user={user} onClose={() => setWorkspaceEvent(null)} />}
-        
+
         {deleteModal && (
           <div className="modal-overlay" onClick={() => setDeleteModal(null)}>
             <div className="modal-box" style={{ maxWidth: '400px' }}>
