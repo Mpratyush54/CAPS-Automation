@@ -14,6 +14,119 @@ const { getDriveClient } = require('../config/google');
 
 const router = express.Router();
 
+/**
+ * Image Proxy Route (Cloudflare Cacheable)
+ * Fetches content from Google Drive (or local storage) and streams it with high-TTL cache headers.
+ * Placed BEFORE router.use(authenticate) to allow public access and edge caching.
+ */
+router.get('/:id/photos/:photoId/view', async (req, res) => {
+    try {
+        const photoId = parseObjectId(req.params.photoId, 'photoId');
+        const db = getDB();
+
+        const photo = await db.collection('driveFiles').findOne({ _id: photoId });
+        if (!photo) return res.status(404).json({ error: 'Photo not found' });
+
+        // Cache strategy: 7 days
+        res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400');
+        res.setHeader('Content-Type', photo.mimeType || 'image/jpeg');
+
+        // 1. If we have a local path and the sync to Drive hasn't finished (or failed), serve local
+        if (photo.localPath && fs.existsSync(photo.localPath)) {
+            console.log(`[proxy] Serving local file: ${photo.localPath}`);
+            return fs.createReadStream(photo.localPath).pipe(res);
+        }
+
+        // 2. If synced to Drive, stream from Google
+        if (photo.googleFileId) {
+            const drive = await getDriveClient();
+            if (!drive) return res.status(503).json({ error: 'Drive service unavailable' });
+
+            console.log(`[proxy] Streaming from Google Drive: ${photo.googleFileId}`);
+            const driveRes = await drive.files.get(
+                { fileId: photo.googleFileId, alt: 'media' },
+                { responseType: 'stream' }
+            );
+
+            return driveRes.data
+                .on('error', (err) => {
+                    console.error('[proxy] stream error:', err.message);
+                    if (!res.headersSent) res.status(500).end();
+                })
+                .pipe(res);
+        }
+
+        return res.status(404).json({ error: 'Media asset not available' });
+
+    } catch (error) {
+        console.error('[proxy] error:', error.message);
+        if (!res.headersSent) res.status(500).json({ error: error.message });
+    }
+});
+
+/**
+ * Resumable Binary Stream Upload
+ * Supports streaming raw binary data directly to disk.
+ * If x-offset is 0, it creates/truncates the file. Otherwise, it appends.
+ * Placed BEFORE router.use(authenticate) to avoid 401 on large binary PATCH requests.
+ */
+router.patch('/:id/photos/:photoId/resumable', async (req, res) => {
+    try {
+        const db = getDB();
+        const eventId = parseObjectId(req.params.id, 'id');
+        const photoId = parseObjectId(req.params.photoId, 'photoId');
+
+        const fileMeta = await db.collection('driveFiles').findOne({ _id: photoId, eventId });
+        if (!fileMeta) return res.status(404).json({ error: 'Photo record not found.' });
+
+        const offset = parseInt(req.headers['x-offset'] || '0', 10);
+        const totalSize = parseInt(req.headers['x-total-size'] || String(fileMeta.sizeBytes), 10);
+
+        const uploadDir = path.join(__dirname, '../../temp/uploads', String(eventId));
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        const filePath = path.join(uploadDir, fileMeta.fileName);
+        const writeStream = fs.createWriteStream(filePath, { flags: offset === 0 ? 'w' : 'a', start: offset });
+
+        req.pipe(writeStream);
+
+        writeStream.on('finish', async () => {
+            const stats = fs.statSync(filePath);
+
+            // Check if upload is complete
+            if (stats.size >= totalSize) {
+                console.log(`✅ [upload] Finished streaming: ${fileMeta.fileName} (${stats.size} bytes)`);
+
+                await db.collection('driveFiles').updateOne(
+                    { _id: photoId },
+                    { $set: { status: 'ready_to_sync', updatedAt: new Date(), localPath: filePath } }
+                );
+
+                await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
+                    eventId: eventId.toString(),
+                    photoId: String(photoId),
+                    fileName: fileMeta.fileName,
+                    localPath: filePath,
+                    uploadedBy: String(fileMeta.uploadedBy),
+                });
+
+                res.json({ success: true, status: 'complete', size: stats.size });
+            } else {
+                res.json({ success: true, status: 'partial', received: stats.size, total: totalSize });
+            }
+        });
+
+        writeStream.on('error', (err) => {
+            console.error('[upload] Stream error:', err.message);
+            res.status(500).json({ error: 'Stream write error' });
+        });
+
+    } catch (error) {
+        console.error('[upload] error:', error.message);
+        res.status(400).json({ error: error.message });
+    }
+});
+
 router.use(authenticate);
 
 /**
@@ -321,19 +434,19 @@ router.post('/:id/photos/upload-url', asyncHandler(async (req, res) => {
     const files = Array.isArray(req.body.files) ? req.body.files : [];
     if (files.length === 0) return fail(res, 400, 'VALIDATION_ERROR', 'files are required.');
 
-    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/tiff']);
     const existingToday = await DriveFile.countDocuments({
         uploadedBy: parseObjectId(req.user._id, '_id'),
         createdAt: { $gte: new Date(Date.now() - (24 * 60 * 60 * 1000)) },
     });
 
-    if (existingToday + files.length > 50) {
+    if (existingToday + files.length > 100) {
         return fail(res, 429, 'RATE_LIMIT', 'Daily upload limit (50 photos) exceeded.');
     }
 
     const docs = files.map((file) => {
         if (!allowedTypes.has(file.mimeType)) throw new Error(`mimeType ${file.mimeType} is not allowed.`);
-        if (Number(file.sizeBytes || 0) > 10 * 1024 * 1024) throw new Error(`file ${file.fileName} exceeds 10MB.`);
+        if (Number(file.sizeBytes || 0) > 50 * 1024 * 1024) throw new Error(`file ${file.fileName} exceeds 50MB.`);
 
         return {
             eventId,
@@ -352,9 +465,10 @@ router.post('/:id/photos/upload-url', asyncHandler(async (req, res) => {
 
     created(res, {
         items: docs.map((doc) => ({
+            id: doc._id,
             fileName: doc.fileName,
             status: doc.status,
-            uploadUrl: `/api/events/${eventId.toString()}/photos/content`
+            uploadUrl: `/api/events/${eventId.toString()}/photos/${doc._id}/resumable`
         }))
     });
 }));
@@ -387,8 +501,10 @@ router.post('/:id/photos/content', asyncHandler(async (req, res) => {
         uploadedBy: String(req.user._id),
     });
 
-    ok(res, { success: true, fileName });
+    ok(res, { success: true, fileName, photoId: fileMeta._id });
 }));
+
+
 
 /**
  * @swagger
@@ -429,7 +545,7 @@ router.get('/:id/photos', async (req, res) => {
             ...p,
             uploadedByName: userMap[String(p.uploadedBy)] || 'Unknown',
             // construct display URL using our local proxy (CF Cacheable)
-            displayUrl: p.googleFileId ? `/api/events/${req.params.id}/photos/${p._id}/view` : (p.folderUrl || null)
+            displayUrl: (p.googleFileId || p.localPath) ? `/api/events/${req.params.id}/photos/${p._id}/view` : null
         }));
 
         ok(res, { rows: enriched });
@@ -571,49 +687,4 @@ module.exports = router;
  * Image Proxy Route (Cloudflare Cacheable)
  * Fetches content from Google Drive and streams it with high-TTL cache headers.
  */
-router.get('/:id/photos/:photoId/view', async (req, res) => {
-    try {
-        const photoId = parseObjectId(req.params.photoId, 'photoId');
-        const db = getDB();
-        const drive = getDriveClient();
 
-        if (!drive) {
-            return fail(res, 503, 'SERVICE_UNAVAILABLE', 'Google Drive service not initialized');
-        }
-
-        const photo = await db.collection('driveFiles').findOne({ _id: photoId });
-        if (!photo) return fail(res, 404, 'NOT_FOUND', 'Photo not found');
-
-        // Cache strategy: 7 days
-        res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400');
-        res.setHeader('Content-Type', 'image/jpeg');
-
-        // 1. If we have a local path and the sync to Drive hasn't finished (or failed), serve local
-        if (photo.localPath && fs.existsSync(photo.localPath)) {
-            console.log(`[proxy] Serving local file: ${photo.localPath}`);
-            return fs.createReadStream(photo.localPath).pipe(res);
-        }
-
-        // 2. If synced to Drive, stream from Google
-        if (photo.googleFileId) {
-            console.log(`[proxy] Streaming from Google Drive: ${photo.googleFileId}`);
-            const driveRes = await drive.files.get(
-                { fileId: photo.googleFileId, alt: 'media' },
-                { responseType: 'stream' }
-            );
-
-            return driveRes.data
-                .on('error', (err) => {
-                    console.error('[proxy] stream error:', err.message);
-                    if (!res.headersSent) res.status(500).end();
-                })
-                .pipe(res);
-        }
-
-        return fail(res, 404, 'NOT_FOUND', 'Media asset not available.');
-
-    } catch (error) {
-        console.error('[proxy] error:', error.message);
-        if (!res.headersSent) fail(res, 500, 'SERVER_ERROR', error.message);
-    }
-});

@@ -15,6 +15,7 @@ const { ObjectId } = require('mongodb');
 const Redis = require('ioredis');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { verifyToken } = require('./middleware/auth');
+const oauthRoutes = require("./utils/oauth");
 
 // 🔵 IMPORT YOUR EXISTING METRICS
 const {
@@ -265,13 +266,13 @@ app.use(cors({
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-bypass-token', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-bypass-token', 'x-api-key', 'x-offset', 'x-total-size'],
 }));
 
 
 // ──────────────── Body Parsing ────────────────
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 
 // ──────────────── Logging ────────────────
@@ -298,18 +299,20 @@ app.get('/api/health', async (req, res) => {
 
 
 // ──────────────── API Routes ────────────────
-app.use('/api/auth', authRoutes); // Auth decides its own logic (e.g., signups are already guarded)
-app.use('/api', worklogRoutes);
-app.use('/api/reports', reportRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/moms', momRoutes);
 app.use('/api/reports/moms', momRoutes);
-app.use('/api/events', eventRoutes);
+app.use('/api', worklogRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/profile', profileRoutes);
+// Google Config for the oauth
 
+app.use("/auth", oauthRoutes);
 
 // ──────────────── 404 Handler ────────────────
 app.use((req, res) => {
