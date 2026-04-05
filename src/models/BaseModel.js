@@ -1,4 +1,5 @@
 const { getDB } = require('../config/database');
+const { ObjectId } = require('mongodb');
 
 class BaseModel {
     static collectionName = '';
@@ -11,27 +12,59 @@ class BaseModel {
     static validate(doc = {}, { partial = false } = {}) {
         const errors = {};
 
-        Object.entries(this.schema || {}).forEach(([field, rule]) => {
+        for (const [field, rule] of Object.entries(this.schema || {})) {
             const value = doc[field];
 
+            // 1. Required Check
             if (!partial && rule.required && (value === undefined || value === null || value === '')) {
                 errors[field] = `${field} is required.`;
-                return;
+                continue;
             }
 
             if (value === undefined || value === null) {
-                return;
+                continue;
             }
 
-            if (rule.enum && !rule.enum.includes(value)) {
-                errors[field] = `${field} must be one of: ${rule.enum.join(', ')}.`;
-                return;
+            // 2. Enum Check
+            if (rule.enum) {
+                if (rule.type === 'array' && Array.isArray(value)) {
+                    const invalidElements = value.filter(v => !rule.enum.includes(v));
+                    if (invalidElements.length > 0) {
+                        errors[field] = `${field} contains invalid values: ${invalidElements.join(', ')}. Allowed: ${rule.enum.join(', ')}.`;
+                    }
+                } else if (!rule.enum.includes(value)) {
+                    errors[field] = `${field} must be one of: ${rule.enum.join(', ')}.`;
+                    continue;
+                }
             }
 
-            if (rule.type === 'array' && !Array.isArray(value)) {
-                errors[field] = `${field} must be an array.`;
+            // 3. Type Checks
+            if (rule.type === 'array') {
+                if (!Array.isArray(value)) {
+                    errors[field] = `${field} must be an array.`;
+                }
+            } else if (rule.type === 'string') {
+                if (typeof value !== 'string') {
+                    errors[field] = `${field} must be a string.`;
+                }
+            } else if (rule.type === 'number') {
+                if (typeof value !== 'number' || isNaN(value)) {
+                    errors[field] = `${field} must be a number.`;
+                }
+            } else if (rule.type === 'boolean') {
+                if (typeof value !== 'boolean') {
+                    errors[field] = `${field} must be a boolean.`;
+                }
+            } else if (rule.type === 'date') {
+                if (!(value instanceof Date) && isNaN(Date.parse(value))) {
+                    errors[field] = `${field} must be a valid date.`;
+                }
+            } else if (rule.type === 'objectId') {
+                if (!(value instanceof ObjectId) && !ObjectId.isValid(value)) {
+                    errors[field] = `${field} must be a valid ObjectId string.`;
+                }
             }
-        });
+        }
 
         return {
             valid: Object.keys(errors).length === 0,

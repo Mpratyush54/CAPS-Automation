@@ -259,7 +259,7 @@ router.post('/weekly', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncH
                 { returnDocument: 'after' }
             );
             await cacheDel('reports:contrib:*');
-            return ok(res, result);
+            return ok(res, { value: result });
         }
 
         const result = await db.collection('weeklyReports').findOneAndUpdate(
@@ -269,8 +269,8 @@ router.post('/weekly', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncH
         );
 
         await cacheDel('reports:contrib:*');
-        created(res, result);
-}));
+        created(res, { value: result });
+    }));
 
 /**
  * @swagger

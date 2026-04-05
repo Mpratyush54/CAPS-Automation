@@ -1,4 +1,4 @@
-const { redisClient } = require("../database/redis");
+const { getRedis } = require("../config/redis");
 const startTimer = require("./timer");
 const zlib = require("zlib");
 const { promisify } = require("util");
@@ -6,6 +6,7 @@ const { promisify } = require("util");
 const gunzip = promisify(zlib.gunzip);
 
 async function readCache(key) {
+  const redisClient = getRedis();
   const t_read = startTimer("cache_read");
   const compressed = await redisClient.getBuffer(key); // IMPORTANT
   t_read();

@@ -24,9 +24,14 @@ function fail(res, status, code, message, fields) {
     });
 }
 
-function parsePagination(query, defaults = {}) {
-    const page = Math.max(Number(query.page || defaults.page || 1), 1);
-    const pageSize = Math.min(Math.max(Number(query.pageSize || defaults.pageSize || 20), 1), 100);
+function parsePagination(query = {}, defaults = {}) {
+    let page = Number(query.page) || Number(defaults.page) || 1;
+    let pageSize = Number(query.pageSize) || Number(defaults.pageSize) || 20;
+
+    if (isNaN(page) || page < 1) page = 1;
+    if (isNaN(pageSize) || pageSize < 1) pageSize = 20;
+    if (pageSize > 100) pageSize = 100;
+
     const skip = (page - 1) * pageSize;
     return { page, pageSize, skip };
 }

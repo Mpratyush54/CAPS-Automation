@@ -43,13 +43,18 @@ const httpRequestDuration = new client.Histogram({
 // });
 register.registerMetric(httpRequestsTotal);
 register.registerMetric(httpRequestDuration);
-// register.registerMetric(activeSockets);
-// register.registerMetric(socketRooms);
-// register.registerMetric(socketBroadcasts);
-// register.registerMetric(redisAdapterStatus);
+
+const functionDuration = new client.Histogram({
+    name: 'Automation_function_duration_seconds',
+    help: 'Internal function execution duration',
+    labelNames: ['function'],
+    buckets: [0.01, 0.05, 0.1, 0.5, 1, 5],
+});
+register.registerMetric(functionDuration);
+
 module.exports = {
     register,
     httpRequestsTotal,
     httpRequestDuration,
-    // activeSockets,
+    functionDuration,
 };

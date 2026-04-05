@@ -1,6 +1,6 @@
 // utils/timer.js
 
-const { functionDuration } = require('../app');
+const { functionDuration } = require('../../config/metrics');
 
 /**
  * Start a Prometheus timer for internal function execution.

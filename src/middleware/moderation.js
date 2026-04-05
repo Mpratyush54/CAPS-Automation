@@ -86,14 +86,20 @@ function analyzeContent(text) {
 
     const reasons = [];
 
-    // Check for profanity and identify specific words
+    // Check for profanity and identify specific words using word boundaries
     const foundProfaneWords = [];
     const lowerText = text.toLowerCase();
-    for (const badWord of filter.list) { // filter.list contains the bad words
-        if (lowerText.includes(badWord)) {
+    
+    // Create a combined regex for efficiency if filter.list is large, 
+    // but for now let's just fix the logic with word boundaries.
+    for (const badWord of filter.list) {
+        const escaped = badWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+        if (regex.test(text)) {
             foundProfaneWords.push(badWord);
         }
     }
+    
     if (foundProfaneWords.length > 0) {
         reasons.push(`Contains profane or abusive language: ${[...new Set(foundProfaneWords)].join(', ')}`);
         // STRICT MODE: Profanity is an immediate block
@@ -137,7 +143,11 @@ function analyzeContent(text) {
 function moderateContent(fields = ['title', 'description', 'content']) {
     return async (req, res, next) => {
         // Ensure filter is up-to-date (debounced)
-        await refreshFilter();
+        try {
+            await refreshFilter();
+        } catch (err) {
+            console.error('refreshFilter error:', err);
+        }
 
         const allReasons = [];
         let maxSeverity = SEVERITY.CLEAN;

@@ -154,7 +154,7 @@ router.patch('/:id', async (req, res) => {
             { returnDocument: 'after' }
         );
 
-        ok(res, result);
+        ok(res, { value: result });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
@@ -198,7 +198,7 @@ router.post('/:id/publish', async (req, res) => {
             return fail(res, 404, 'NOT_FOUND', 'MOM not found.');
         }
 
-        ok(res, result);
+        ok(res, { value: result });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }

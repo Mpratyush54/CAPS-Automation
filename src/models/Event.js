@@ -16,6 +16,7 @@ Event.schema = {
     createdBy: { type: 'objectId', required: true },
     attendeeCount: { type: 'number' },
     assignedRoleVisibility: { type: 'array' },
+    teamIds: { type: 'array' },
 };
 
 module.exports = Event;

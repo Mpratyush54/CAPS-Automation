@@ -74,7 +74,7 @@ router.patch('/:id/read', asyncHandler(async (req, res) => {
         { returnDocument: 'after' }
     );
     await cacheDel(`notifications:inbox:${req.user._id}:*`);
-    return ok(res, result);
+    return ok(res, { value: result });
 }));
 
 /**
@@ -384,7 +384,7 @@ router.post('/devices', asyncHandler(async (req, res) => {
         }));
     }
 
-    created(res, result);
+    created(res, { value: result });
 }));
 
 /**

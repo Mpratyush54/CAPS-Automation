@@ -103,7 +103,7 @@ router.patch('/me', async (req, res) => {
         { $set: allowed },
         { returnDocument: 'after', projection: { password: 0 } }
     );
-    return ok(res, result);
+    return ok(res, { value: result });
 });
 
 /**

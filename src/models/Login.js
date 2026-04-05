@@ -1,59 +1,32 @@
-const mongoose = require('mongoose');
+const BaseModel = require('./BaseModel');
 
-const userSchema = new mongoose.Schema(
-  {
-    username: { type: String, required: true, unique: true, index: true },
+class User extends BaseModel {}
 
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-      match: [/^\S+@\S+\.\S+$/, "Invalid email format"]
+User.collectionName = 'users';
+User.schema = {
+    username: { type: 'string', required: true },
+    email: { type: 'string', required: true }, // Simple validation for now, BaseModel doesn't support regex currently
+    passwordHash: { type: 'string', required: true },
+    name: { type: 'string', required: true },
+    class: { type: 'string', required: true },
+    section: { type: 'string', required: true },
+    rollNo: { type: 'number', required: true },
+    failedLoginAttempts: { type: 'number' },
+    lockUntil: { type: 'date' },
+    roles: { 
+        type: 'array', 
+        required: true, 
+        enum: ['Super Admin', 'Admin', 'Team Lead', 'Volunteer', 'student'] 
     },
-
-    passwordHash: { type: String, required: true },
-
-    // profile fields
-    name: { type: String, required: true },
-    class: { type: String, required: true },
-    section: { type: String, required: true },
-    rollNo: { type: Number, required: true },
-
-    // security fields
-    failedLoginAttempts: { type: Number, default: 0 },
-    lockUntil: { type: Date, default: null },
-
-    // roles
-    roles: {
-      type: [String],
-      enum: ['Super Admin', 'Admin', 'Team Lead', 'Volunteer', 'student'],
-      default: ['Volunteer']
+    teamId: { type: 'objectId' },
+    scope: { 
+        type: 'string', 
+        required: true, 
+        enum: ['Entire CAPS', 'Their wing', 'Their committee', 'Only self'] 
     },
-    teamId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'TeamDirectory',
-      default: null
-    },
+    dob: { type: 'date', required: true },
+    resetOtp: { type: 'string' },
+    resetOtpExpiresAt: { type: 'date' },
+};
 
-    // scope and operational boundaries
-    scope: {
-      type: String,
-      enum: ['Entire CAPS', 'Their wing', 'Their committee', 'Only self'],
-      default: 'Only self'
-    },
-
-    // Date of Birth
-    dob: { type: Date, required: true },
-
-    // OTP fields
-    resetOtp: { type: String, default: null },
-    resetOtpExpiresAt: { type: Date, default: null },
-  },
-
-  { timestamps: true }
-);
-
-// Correct export — prevents overwrite issues
-module.exports = mongoose.models.User || mongoose.model('User', userSchema);
+module.exports = User;

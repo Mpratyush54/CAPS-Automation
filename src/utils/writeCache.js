@@ -1,4 +1,4 @@
-const { redisClient } = require("../database/redis");
+const { getRedis } = require("../config/redis");
 const startTimer = require("./timer");
 const zlib = require("zlib");
 const { promisify } = require("util");
@@ -6,6 +6,7 @@ const { promisify } = require("util");
 const gzip = promisify(zlib.gzip);
 
 async function writeCache(key, ttlSeconds, value) {
+  const redisClient = getRedis();
   try {
     const json = JSON.stringify(value);
 
@@ -16,7 +17,7 @@ async function writeCache(key, ttlSeconds, value) {
     const t_write = startTimer("cache_write");
 
     if (ttlSeconds > 0) {
-      await redisClient.setEx(key, ttlSeconds, compressed);
+      await redisClient.setex(key, ttlSeconds, compressed);
     } else {
       await redisClient.set(key, compressed);
     }

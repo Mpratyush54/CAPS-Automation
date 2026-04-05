@@ -366,8 +366,9 @@ module.exports = {
   addConstants,
   zScore,
   percentileFromZ,
-  applyFormula,
   applyReverse,
+  toNum,
+  escapeRegExp,
 
   // helpful camelCase aliases
   computeRawScores: compute_raw_scores,
@@ -381,7 +382,6 @@ module.exports = {
   percentile_from_z: percentileFromZ,
   apply_formula: applyFormula,
   kolb_score,
-  kolb_score:kolb_score,
   ei_score,
   eiScore: ei_score,
   sumAllTraits,

@@ -11,6 +11,7 @@ const Event = require('../models/Event');
 const EventReport = require('../models/EventReport');
 const DriveFile = require('../models/DriveFile');
 const { getDriveClient } = require('../config/google');
+const { enrichEventWithTeams, enrichEventsWithTeams } = require('../utils/event');
 
 const router = express.Router();
 
@@ -202,7 +203,9 @@ router.post('/', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler
 
     const result = await Event.insertOne(doc);
     doc._id = result.insertedId;
-    created(res, doc);
+
+    const enriched = await enrichEventWithTeams(doc);
+    created(res, enriched);
 }));
 
 router.get('/', async (req, res) => {
@@ -223,7 +226,10 @@ router.get('/', async (req, res) => {
 
         const total = await Event.countDocuments(filter);
         const items = await Event.find(filter).sort({ eventDate: -1 }).skip(skip).limit(pageSize).toArray();
-        ok(res, { rows: items }, { page, pageSize, total });
+
+        const rows = await enrichEventsWithTeams(items);
+
+        ok(res, { rows }, { page, pageSize, total });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
@@ -281,9 +287,12 @@ router.get('/:id', async (req, res) => {
         const _id = parseObjectId(req.params.id, 'id');
         const event = await Event.findOne({ _id });
         if (!event) return fail(res, 404, 'NOT_FOUND', 'Event not found.');
+
+        const enriched = await enrichEventWithTeams(event);
+
         const report = await EventReport.findOne({ eventId: _id });
         const photos = await DriveFile.find({ eventId: _id }).sort({ createdAt: -1 }).toArray();
-        return ok(res, { event, report, photos });
+        return ok(res, { event: enriched, report, photos });
     } catch (error) {
         return fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
@@ -293,18 +302,39 @@ router.patch('/:id', async (req, res) => {
     try {
         const _id = parseObjectId(req.params.id, 'id');
         const update = { updatedAt: new Date() };
+
         if (req.body.title !== undefined) update.title = req.body.title;
         if (req.body.description !== undefined) update.description = req.body.description;
         if (req.body.date !== undefined || req.body.eventDate !== undefined) update.eventDate = parseDate(req.body.date || req.body.eventDate, 'eventDate');
         if (req.body.time !== undefined || req.body.startTime !== undefined) update.startTime = req.body.time || req.body.startTime;
         if (req.body.location !== undefined) update.location = req.body.location;
         if (req.body.status !== undefined) update.status = req.body.status;
-        if (req.body.attendees !== undefined || req.body.attendeeCount !== undefined) update.attendeeCount = Number(req.body.attendees || req.body.attendeeCount || 0);
-        if (req.body.teamIds !== undefined) update.teamIds = req.body.teamIds.map(id => parseObjectId(id, 'teamIds'));
+        if (req.body.scope !== undefined) update.scope = req.body.scope;
+        if (req.body.wingId !== undefined) update.wingId = parseObjectId(req.body.wingId, 'wingId');
+        if (req.body.committeeId !== undefined) update.committeeId = parseObjectId(req.body.committeeId, 'committeeId');
+
+        if (req.body.attendees !== undefined || req.body.attendeeCount !== undefined) {
+            update.attendeeCount = Number(req.body.attendees || req.body.attendeeCount || 0);
+        }
+
+        if (req.body.teamIds !== undefined && Array.isArray(req.body.teamIds)) {
+            update.teamIds = req.body.teamIds.map(id => parseObjectId(id, 'teamIds'));
+        }
+
+        console.log(`[PATCH /api/events/${req.params.id}] Updating with:`, update);
 
         const result = await Event.findOneAndUpdate({ _id }, { $set: update }, { returnDocument: 'after' });
-        return ok(res, result);
+
+        if (!result) {
+            console.warn(`[PATCH /api/events/${req.params.id}] Event not found for update.`);
+            return fail(res, 404, 'NOT_FOUND', 'Event not found.');
+        }
+
+        const enriched = await enrichEventWithTeams(result);
+
+        return ok(res, enriched);
     } catch (error) {
+        console.error(`[PATCH /api/events/${req.params.id}] Error:`, error.message);
         return fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
 });

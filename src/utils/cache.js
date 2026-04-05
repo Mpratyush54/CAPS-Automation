@@ -1,9 +1,10 @@
 // utils/cache.js
-const { redisClient } = require('../database/redis');
+const { getRedis } = require('../config/redis');
 const startTimer = require('./timer');
 
 function cache(keyBuilder, ttlSeconds = 60) {
   return async (req, res, next) => {
+    const redisClient = getRedis();
 
     // ❌ Do NOT cache POST, PUT, DELETE
     if (req.method !== "GET") return next();

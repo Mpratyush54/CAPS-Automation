@@ -136,7 +136,7 @@ router.post('/login', async (req, res) => {
         }
 
         const db = getDB();
-        const user = await db.collection('users').findOne({ email: email.toLowerCase() });
+        const user = await db.collection('users').findOne({ email: email.toLowerCase().trim() });
 
         if (!user) {
             return res.status(401).json({ error: 'Invalid email or password.' });

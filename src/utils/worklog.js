@@ -101,19 +101,26 @@ function resolveScopedFields(user, input = {}) {
     if (isAdminLike(user.role)) {
         return {
             teamId: parseObjectId(input.teamId, 'teamId'),
+            wingId: parseObjectId(input.wingId, 'wingId'),
+            committeeId: parseObjectId(input.committeeId, 'committeeId'),
             scopeSource: 'manually_selected_scope',
         };
     }
 
     if (user.teamId) {
+        // Find if this team is a wing or committee (simplified for now)
         return {
             teamId: parseObjectId(user.teamId, 'teamId'),
+            wingId: parseObjectId(user.wingId, 'wingId'),
+            committeeId: parseObjectId(user.committeeId, 'committeeId'),
             scopeSource: 'inherited_user_score',
         };
     }
 
     return {
         teamId: parseObjectId(input.teamId, 'teamId'),
+        wingId: parseObjectId(input.wingId, 'wingId'),
+        committeeId: parseObjectId(input.committeeId, 'committeeId'),
         scopeSource: 'self_selected_during_transition',
     };
 }
