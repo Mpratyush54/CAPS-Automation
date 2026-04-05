@@ -8,6 +8,42 @@ import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES } from '../rbac';
 import { api, getErrorMessage, unwrap, formatDateTimeLabel } from '../lib/api';
+import { Skeleton, SkeletonText, SkeletonTitle, SkeletonAvatar } from '../components/Skeleton';
+
+const DashboardSkeleton = () => (
+  <div className="stack-gap-1">
+    <div className="grid-cols-4">
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+          <Skeleton style={{ width: '2.5rem', height: '2.5rem', borderRadius: '0.625rem' }} />
+          <div style={{ flex: 1 }}>
+            <SkeletonTitle width="40%" />
+            <SkeletonText width="60%" />
+          </div>
+        </div>
+      ))}
+    </div>
+    <div className="grid-sidebar-right">
+      <div className="card">
+        <SkeletonTitle />
+        <div className="stack-gap-1">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ display: 'flex', gap: '0.75rem', padding: '0.625rem 0' }}>
+              <SkeletonAvatar />
+              <div style={{ flex: 1 }}>
+                <SkeletonText width="80%" />
+                <SkeletonText width="40%" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="card">
+        <Skeleton style={{ height: '180px', width: '100%' }} />
+      </div>
+    </div>
+  </div>
+);
 
 const fallbackDashboard = {
   volunteer: {
@@ -416,6 +452,7 @@ const normalizeDashboard = (role, payload) => {
 const Dashboard = () => {
   const { user, role } = useAuthStore();
   const [dashboardData, setDashboardData] = useState(() => normalizeDashboard(role, null));
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -438,6 +475,8 @@ const Dashboard = () => {
           setDashboardData(normalizeDashboard(role, null));
           setError(getErrorMessage(dashboardError, 'Unable to load dashboard data.'));
         }
+      } finally {
+        if (mounted) setLoading(false);
       }
     };
     loadDashboard();
@@ -467,7 +506,7 @@ const Dashboard = () => {
       <div className="page-body">
         {error ? <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem' }}>{error}</div> : null}
         <HeroBanner user={user} role={role} subtitle={dashboardData.hero?.subtitle} />
-        {content}
+        {loading ? <DashboardSkeleton /> : content}
       </div>
     </>
   );

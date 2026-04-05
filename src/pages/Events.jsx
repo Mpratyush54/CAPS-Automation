@@ -6,6 +6,7 @@ import { ROLES, can } from '../rbac';
 import { api, API_BASE_URL, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
 import { normalizeEvent } from '../lib/adapters';
 import { Loader2 } from 'lucide-react';
+import { CardSkeleton } from '../components/Skeleton';
 
 const statusColors = { upcoming: 'badge-primary', ongoing: 'badge-warning', completed: 'badge-success' };
 
@@ -632,11 +633,13 @@ const EventCard = ({ event, role, teams, onWorkspace, onEdit, onDelete }) => {
   const canDelete = can(role, 'createWingEvent');
   const status = (event.status || 'upcoming').toLowerCase();
 
-  // Resolve team names
-  const teamNames = (event.teamIds || []).map(id => {
-    const t = teams.find(x => x._id === String(id));
-    return t ? t.name : null;
-  }).filter(Boolean);
+  // Resolve team names from normalized event data or fallback to global teams list
+  const teamNames = event.teams?.length > 0 
+    ? event.teams.map(t => t.name)
+    : (event.teamIds || []).map(id => {
+        const t = teams.find(x => x._id === String(id));
+        return t ? t.name : null;
+      }).filter(Boolean);
 
   return (
     <div className="card event-card" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -771,7 +774,9 @@ const Events = () => {
         </div>
 
         {loading && events.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '4rem' }}>Loading events...</div>
+          <div className="events-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
+             <CardSkeleton count={6} />
+          </div>
         ) : (
           <div className="events-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1rem' }}>
             {filtered.map((event) => (

@@ -4,6 +4,7 @@ import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
 import { api, getErrorMessage, unwrap } from '../lib/api';
+import { SkeletonText, TableSkeleton } from '../components/Skeleton';
 
 const Modal = ({ title, onClose, children, maxWidth = '480px' }) => (
   <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -368,24 +369,33 @@ const Organization = () => {
             </div>
 
             <div className="stack-gap-1"> {/* WINGS */}
-              {
-                teams.filter(t => t.type === 'wing').filter(t => (t?.name || '').toLowerCase().includes(
-                  (search || '').toLowerCase())).map(team => {
-                    const isActive = selectedId === team.id;
-                    return (
-                      <button key={team.id} onClick={() => setSelectedId(team.id)}
-                        className={`btn-ghost ${isActive ? 'active' : ''}`}
-                        style={{
-                          width: '100%', justifyContent: 'flex-start',
-                          padding: '0.5rem', fontWeight: 700, fontSize: '0.8125rem', background: isActive ? 'rgba(67, 67, 213, 0.1)' : 'transparent', borderRadius: '0.5rem'
-                        }} >
-                        <Building2 size={13} style={{ marginRight: '0.5rem' }} /> {team.name} </button>);
+              {loading && teams.length === 0 ? (
+                <>
+                  {[...Array(6)].map((_, i) => (
+                    <div key={i} style={{ padding: '0.5rem' }}><SkeletonText width="80%" height="1.5rem" /></div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {teams.filter(t => t.type === 'wing').filter(t => (t?.name || '').toLowerCase().includes(
+                    (search || '').toLowerCase())).map(team => {
+                      const isActive = selectedId === team.id;
+                      return (
+                        <button key={team.id} onClick={() => setSelectedId(team.id)}
+                          className={`btn-ghost ${isActive ? 'active' : ''}`}
+                          style={{
+                            width: '100%', justifyContent: 'flex-start',
+                            padding: '0.5rem', fontWeight: 700, fontSize: '0.8125rem', background: isActive ? 'rgba(67, 67, 213, 0.1)' : 'transparent', borderRadius: '0.5rem'
+                          }} >
+                          <Building2 size={13} style={{ marginRight: '0.5rem' }} /> {team.name} </button>);
+                    })}
+                  {/* COMMITTEES */}
+                  {teams.filter(t => t.type === 'committee').filter(t => (t?.name || '').toLowerCase().includes((search || '').toLowerCase())).map(team => {
+                    const isActive = selectedId === team.id; return (<button key={team.id} onClick={() => setSelectedId(team.id)} className={`btn-ghost ${isActive ? 'active' : ''}`} style={{ padding: '0.375rem 0.75rem', fontSize: '0.75rem', justifyContent: 'flex-start', marginLeft: '1rem' }} > <Shield size={11} style={{ marginRight: '0.4rem' }} /> {team.name} </button>);
                   })}
-              {/* COMMITTEES */}
-              {
-                teams.filter(t => t.type === 'committee').filter(t => (t?.name || '').toLowerCase().includes((search || '').toLowerCase())).map(team => {
-                  const isActive = selectedId === team.id; return (<button key={team.id} onClick={() => setSelectedId(team.id)} className={`btn-ghost ${isActive ? 'active' : ''}`} style={{ padding: '0.375rem 0.75rem', fontSize: '0.75rem', justifyContent: 'flex-start', marginLeft: '1rem' }} > <Shield size={11} style={{ marginRight: '0.4rem' }} /> {team.name} </button>);
-                })} </div>
+                </>
+              )}
+            </div>
 
             {!loading && teams.length === 0 && (
               <p style={{ textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-outline)', padding: '1rem' }}>No organizational units found.</p>
@@ -424,21 +434,27 @@ const Organization = () => {
                   <table className="data-table">
                     <thead><tr><th>Name</th><th>Email</th><th>Role</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                     <tbody>
-                      {(selectedTeam?.members || []).map((member) => (
-                        <tr key={member.id}>
-                          <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            {member.name}
-                            {member.isLead && <span title="Team Lead / Admin" style={{ color: 'var(--color-primary)', display: 'flex' }}><Shield size={12} fill="currentColor" fillOpacity={0.2} /></span>}
-                          </td>
-                          <td style={{ color: 'var(--color-on-surface-variant)', fontSize: '0.8125rem' }}>{member.email}</td>
-                          <td><span className={`badge ${member.isLead ? 'badge-primary' : 'badge-neutral'}`} style={{ fontWeight: member.isLead ? 700 : 400 }}>{member.role}</span></td>
-                          <td style={{ textAlign: 'right' }}>
-                            {canManageDirectory && <button className="btn-ghost" onClick={() => removeMember(member.id)} style={{ color: 'var(--color-error)', border: 'none', cursor: 'pointer', background: 'transparent' }}><Trash2 size={13} /></button>}
-                          </td>
-                        </tr>
-                      ))}
-                      {(!selectedTeam?.members || selectedTeam.members.length === 0) && (
-                        <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-outline)' }}>No members listed in this unit. Click "Add Member" to populate the roster.</td></tr>
+                      {loading ? (
+                        <TableSkeleton rows={5} cols={4} />
+                      ) : (
+                        <>
+                          {(selectedTeam?.members || []).map((member) => (
+                            <tr key={member.id}>
+                              <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {member.name}
+                                {member.isLead && <span title="Team Lead / Admin" style={{ color: 'var(--color-primary)', display: 'flex' }}><Shield size={12} fill="currentColor" fillOpacity={0.2} /></span>}
+                              </td>
+                              <td style={{ color: 'var(--color-on-surface-variant)', fontSize: '0.8125rem' }}>{member.email}</td>
+                              <td><span className={`badge ${member.isLead ? 'badge-primary' : 'badge-neutral'}`} style={{ fontWeight: member.isLead ? 700 : 400 }}>{member.role}</span></td>
+                              <td style={{ textAlign: 'right' }}>
+                                {canManageDirectory && <button className="btn-ghost" onClick={() => removeMember(member.id)} style={{ color: 'var(--color-error)', border: 'none', cursor: 'pointer', background: 'transparent' }}><Trash2 size={13} /></button>}
+                              </td>
+                            </tr>
+                          ))}
+                          {(!selectedTeam?.members || selectedTeam.members.length === 0) && (
+                            <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-outline)' }}>No members listed in this unit. Click "Add Member" to populate the roster.</td></tr>
+                          )}
+                        </>
                       )}
                     </tbody>
                   </table>

@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
 import { api, formatDateTime, getErrorMessage, unwrap } from '../lib/api';
 import { normalizeLog } from '../lib/adapters';
+import { TableSkeleton, CardSkeleton } from '../components/Skeleton';
 
 const STATUS_META = {
   'draft': { label: 'Draft', badge: 'badge-neutral' },
@@ -428,7 +429,7 @@ const Logs = () => {
             </thead>
             <tbody>
               {loading && logs.length === 0 ? (
-                <tr><td colSpan="9" style={{ textAlign: 'center', padding: '4rem' }}><Loader2 className="spin" size={32} style={{ margin: '0 auto', color: 'var(--color-primary)' }} /></td></tr>
+                <TableSkeleton rows={8} cols={role === ROLES.VOLUNTEER ? 6 : 8} />
               ) : filtered.length === 0 ? (
                 <tr><td colSpan="9" style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-on-surface-variant)' }}>No logs for '{filter}'{search ? ` matching '${search}'` : ''}.</td></tr>
               ) : filtered.map((log) => (
@@ -497,7 +498,9 @@ const Logs = () => {
 
         {/* MOBILE LIST */}
         <div className="mobile-log-list">
-          {filtered.length === 0 && !loading ? (
+          {loading && logs.length === 0 ? (
+            <CardSkeleton count={5} />
+          ) : filtered.length === 0 && !loading ? (
              <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--color-on-surface-variant)' }}>No logs for '{filter}'{search ? ` matching '${search}'` : ''}.</div>
           ) : filtered.map((log) => (
             <div key={log.id} className={`log-card ${log.status === 'Needs Revision' && log.isOwn ? 'needs-revision' : ''}`} style={{

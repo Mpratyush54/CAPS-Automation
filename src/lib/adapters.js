@@ -55,6 +55,7 @@ export const normalizeEvent = (event) => ({
   status: titleizeStatus(event.status || 'upcoming'),
   assignedTo: event.assignedRoleVisibility || event.assignedTo || ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'],
   description: event.description || '',
+  teams: (event.teams || []).map(t => ({ id: t.id || t._id || t, name: t.name || 'Unnamed Team' })),
   report: {
     status: titleizeStatus(event.report?.status || event.eventReport?.status || 'draft'),
     owner: event.report?.owner || event.eventReport?.owner || event.reportOwner || 'Unassigned',
