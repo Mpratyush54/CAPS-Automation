@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
     "seed": "node src/seed.js",
     "test": "jest tests/ --runInBand --detectOpenHandles",
     "test:unit": "jest tests/unit/ --detectOpenHandles",
@@ -43,7 +44,7 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "nodemon": "^3.1.11",
+    "nodemon": "^3.1.14",
     "socket.io-client": "^4.8.3",
     "supertest": "^7.1.3"
   },

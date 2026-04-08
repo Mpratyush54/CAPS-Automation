@@ -25,12 +25,12 @@ async function startNotificationWorker() {
         try {
             // BRPOP: Block until a job is available (timeout 30s)
             const result = await workerRedis.blpop(`queue:${QUEUES.NOTIFICATION_SEND}`, 30);
-            
+
             if (result) {
                 const [_, jobStr] = result;
                 const job = JSON.parse(jobStr);
                 const { payload } = job;
-                
+
                 await processNotificationJob(payload);
             }
         } catch (err) {
@@ -50,7 +50,7 @@ async function startNotificationWorker() {
 async function processNotificationJob(payload) {
     const db = getDB();
     const { notificationIds, audienceRecord } = payload;
-    
+
     // 1. Fetch notifications
     const filter = {};
     if (notificationIds && notificationIds.length > 0) {
@@ -62,7 +62,7 @@ async function processNotificationJob(payload) {
     }
 
     const notifications = await db.collection('notifications').find(filter).toArray();
-    
+
     if (notifications.length === 0) {
         console.log('ℹ️ Notification Worker: No matching notifications found to send.');
         return;
@@ -124,29 +124,41 @@ async function dispatchPush(subscription, notification) {
     if (type === 'web-push' && typeof token === 'object') {
         try {
             const webpush = require('web-push');
-            
-            // Configure VAPID from environment
-            const publicKey = process.env.VAPID_PUBLIC_KEY || 'BCW6_lH9i-A4R87Jq0m7S_p45K2I_S_LwN_2YvN8_pU4V_rU-C2_l_U8';
-            const privateKey = process.env.VAPID_PRIVATE_KEY;
-            const email = process.env.VAPID_EMAIL || 'admin@pratyushes.dev';
 
-            if (!privateKey) {
-                console.warn('⚠️ Push Dispatch: VAPID_PRIVATE_KEY is missing. Skipping real delivery.');
+            // Configure VAPID from environment
+            const publicKey = process.env.VAPID_PUBLIC_KEY;
+            const privateKey = process.env.VAPID_PRIVATE_KEY;
+            const email = process.env.VAPID_EMAIL || 'caps-automation@example.com';
+
+            if (!privateKey || !publicKey) {
+                console.warn('⚠️ Push Dispatch: VAPID_PRIVATE_KEY or PUBLIC_KEY is missing. Skipping real delivery.');
                 return;
             }
 
             webpush.setVapidDetails(`mailto:${email}`, publicKey, privateKey);
 
-            await webpush.sendNotification(token, JSON.stringify({
-                title,
-                body,
-                icon: '/logo192.png',
-                url: `/notifications/${notification._id || ''}`
-            }));
-            
-            console.log(`✅ [WEB-PUSH] Delivered to ${deviceName}`);
+            const payload = JSON.stringify({
+                title: notification.title || 'New Notification',
+                body: notification.body || 'No content provided',
+                icon: '/logo.png',
+                badge: '/badge.png',
+                vibrate: [200, 100, 200],
+                data: {
+                    url: notification.url || '/notifications',
+                    id: notification._id || null,
+                    timestamp: new Date().getTime()
+                },
+                requireInteraction: true,
+                actions: [
+                    { action: 'view', title: 'View' },
+                    { action: 'close', title: 'Close' }
+                ]
+            });
+
+            await webpush.sendNotification(token, payload);
+            console.log(`✅ [WEB-PUSH] Sent "${notification.title || 'Untitled'}" to ${deviceName} (User: ${notification.recipientUserId})`);
         } catch (err) {
-            console.error(`❌ [WEB-PUSH] Error for ${deviceName}:`, err.message);
+            console.error(`❌ [WEB-PUSH] Delivery Error for ${deviceName}:`, err.message);
             // If the the push service returns 410 (Gone) or 404, we should mark the the sub as inactive
             if (err.statusCode === 410 || err.statusCode === 404) {
                 const db = getDB();

@@ -1,5 +1,5 @@
 const { getDB } = require('../config/database');
-const { getRedis } = require('../config/redis');
+const { getRedis, cacheDel } = require('../config/redis');
 const { QUEUES } = require('./queue');
 
 /**
@@ -12,44 +12,68 @@ const { QUEUES } = require('./queue');
  * @param {string} [options.url='/notifications'] - Direct link
  * @param {Object} [options.meta] - Additional metadata
  */
-async function sendSystemNotification(userId, { title, body, type = 'system', url = '/notifications', meta = {} }) {
+/**
+ * Send a notification to a specific user and queue it for push delivery.
+ */
+async function sendSystemNotification(userId, {
+    title,
+    body,
+    type = 'system',
+    url = '/notifications',
+    fromLabel = 'System',
+    fromRoleLabel = 'Core',
+    meta = {}
+}) {
     try {
         const db = getDB();
+        const { parseObjectId } = require('./worklog');
+        const targetId = parseObjectId(userId);
+
         const notification = {
-            recipientUserId: userId,
+            recipientUserId: targetId,
             title,
             body,
             type,
             url,
+            isRead: false,
+            read: false,
+            fromLabel,
+            fromRoleLabel,
             meta,
-            status: 'unread',
-            createdAt: new Date()
+            createdAt: new Date(),
+            updatedAt: new Date()
         };
 
         // 1. Save to MongoDB
         const result = await db.collection('notifications').insertOne(notification);
         const notificationId = result.insertedId;
-        console.log(`🔔 [NOTIF] Created: ${notificationId} for User: ${userId} | Title: ${title}`);
+        console.log(`🔔 [NOTIF] Created: ${notificationId} for User: ${targetId} | Title: ${title}`);
 
-        // 2. Clear user cache (if any)
+        // 2. Clear user cache and state
         const redis = getRedis();
+        const { enqueue, QUEUES: Q } = require('./queue');
         if (redis) {
-            await redis.del(`notifications:unread:${userId}`);
-            
-            // 3. Queue for PUSH DISPATCH (for when user is NOT online)
-            await redis.lpush(`queue:${QUEUES.NOTIFICATION_SEND}`, JSON.stringify({
-                payload: { notificationIds: [notificationId] }
-            }));
+            await redis.del(`user:active:${targetId}`); // Treat as new activity
+            await cacheDel(`notifications:inbox:${targetId}:*`);
+
+            // 3. Queue for PUSH DISPATCH
+            await enqueue(Q.NOTIFICATION_SEND, { notificationIds: [notificationId] });
             console.log(`📡 [NOTIF] Queued for Push: ${notificationId}`);
         }
 
         // 4. EMIT REAL-TIME SOCKET EVENT
         const socketBridge = require('../lib/socketBridge');
-        const emitted = socketBridge.emitToUser(userId, 'notification:new', {
+        const { sent, roomSize } = socketBridge.emitToUser(targetId, 'notification:new', {
             ...notification,
-            _id: notificationId
+            _id: notificationId,
+            id: notificationId
         });
-        console.log(`⚡ [NOTIF] Socket Emission: ${emitted ? 'SENT 🟢' : 'SKIPPED ⚪ (No IO Instance)'} to User: ${userId}`);
+
+        let socketIcon = 'SKIPPED 🟡 (User Offline)';
+        if (!sent) socketIcon = 'SKIPPED ⚪ (No IO Instance)';
+        if (sent && roomSize > 0) socketIcon = 'SENT 🟢';
+
+        console.log(`⚡ [NOTIF] Socket Emission: ${socketIcon} to User: ${targetId}`);
 
         return notificationId;
     } catch (err) {
@@ -63,11 +87,12 @@ async function sendSystemNotification(userId, { title, body, type = 'system', ur
  */
 async function notifyAdmins({ title, body, type, url, meta }) {
     const db = getDB();
-    const admins = await db.collection('users').find({ 
-        role: { $in: ['Admin', 'Super Admin'] } 
+    const admins = await db.collection('users').find({
+        role: { $in: ['Admin', 'Super Admin'] }
     }).toArray();
 
     for (const admin of admins) {
+        console.log({ title, body, type, url, meta })
         await sendSystemNotification(admin._id, { title, body, type, url, meta });
     }
 }

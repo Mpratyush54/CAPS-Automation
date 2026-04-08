@@ -2,7 +2,7 @@ const express = require('express');
 const { getDB } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler, cacheResponse } = require('../middleware/api');
-const { getPeriodBounds, parseObjectId } = require('../utils/worklog');
+const { ROLES, getPeriodBounds, parseObjectId } = require('../utils/worklog');
 const { ok, fail } = require('../utils/api');
 const { cacheSet } = require('../config/redis');
 
@@ -13,9 +13,22 @@ router.use(authenticate);
 /* -------------------- HELPERS -------------------- */
 
 // Resolves a list of team IDs based on wing (labelOne) and committee (labelTwo) filters
-async function getTargetTeamIds(db, labelOneId, labelTwoId) {
-    if (labelTwoId) {
-        return [parseObjectId(labelTwoId, 'labelTwoId')];
+// enforcing RBAC: Team Leads only see their own teamId.
+async function getTargetTeamIds(db, user, labelOneId, labelTwoId, teamId) {
+    const isAdmin = user && [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(user.role);
+
+    if (!isAdmin) {
+        // Restricted to their own team only
+        if (!user || !user.teamId) {
+            return [parseObjectId('000000000000000000000000')]; // Force no results
+        }
+        return [parseObjectId(user.teamId)];
+    }
+
+    // Admin/Super Admin can filter as they wish
+    const tid = teamId || labelTwoId;
+    if (tid) {
+        return [parseObjectId(tid, 'teamId')];
     }
     if (labelOneId) {
         const wingId = parseObjectId(labelOneId, 'labelOneId');
@@ -83,9 +96,61 @@ async function getTrends(db, match, months = 6) {
 
 /* -------------------- ROUTES -------------------- */
 
-router.get('/overview', cacheResponse((req) => `stats:overview:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
+/**
+ * @swagger
+ * /api/stats/overview:
+ *   get:
+ *     summary: Get analytics overview (KPIs, trends, pie charts)
+ *     tags: [Stats]
+ *     parameters:
+ *       - in: query
+ *         name: view
+ *         schema: { type: string, enum: [global, wing, committee, team] }
+ *       - in: query
+ *         name: labelOneId
+ *         description: Wing ID filter
+ *         schema: { type: string }
+ *       - in: query
+ *         name: labelTwoId
+ *         description: Committee/Team ID filter
+ *         schema: { type: string }
+ *       - in: query
+ *         name: period
+ *         schema: { type: string, enum: [monthly, 6m] }
+ *     responses:
+ *       200:
+ *         description: Analytics overview data
+ *         content:
+ *           'application/json':
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     scopeLabel: { type: string }
+ *                     kpi:
+ *                       type: object
+ *                       properties:
+ *                         hours: { type: number }
+ *                         logs: { type: number }
+ *                         events: { type: number }
+ *                         efficiency: { type: string }
+ *                     weekly:
+ *                       type: array
+ *                       items: { type: object }
+ *                     pie:
+ *                       type: array
+ *                       items: { type: object }
+ *                     monthly:
+ *                       type: array
+ *                       items: { type: number }
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.get('/overview', cacheResponse((req) => `stats:overview:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.teamId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
-    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, req.query.labelTwoId);
+    const teamIds = await getTargetTeamIds(db, req.user, req.query.labelOneId, req.query.labelTwoId, req.query.teamId);
     const match = teamIds ? { teamId: { $in: teamIds } } : {};
     const view = req.query.view || 'team';
 
@@ -116,9 +181,26 @@ router.get('/overview', cacheResponse((req) => `stats:overview:${req.user?._id}:
     return ok(res, payload);
 }));
 
-router.get('/breakdown', cacheResponse((req) => `stats:breakdown:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}`, 600), asyncHandler(async (req, res) => {
+/**
+ * @swagger
+ * /api/stats/breakdown:
+ *   get:
+ *     summary: Get detailed performance breakdown by subunit
+ *     tags: [Stats]
+ *     parameters:
+ *       - in: query
+ *         name: labelOneId
+ *         description: Wing ID filter
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.get('/breakdown', cacheResponse((req) => `stats:breakdown:${req.user?._id}:${req.query.view || ''}:${req.query.labelOneId || ''}:${req.query.teamId || ''}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
-    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, null);
+    const teamIds = await getTargetTeamIds(db, req.user, req.query.labelOneId, null, req.query.teamId);
     const match = teamIds ? { teamId: { $in: teamIds } } : {};
 
     const rows = await db.collection('workLogs').aggregate([
@@ -145,9 +227,31 @@ router.get('/breakdown', cacheResponse((req) => `stats:breakdown:${req.user?._id
     return ok(res, payload);
 }));
 
-router.get('/contributions', cacheResponse((req) => `stats:contrib:${req.user?._id}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
+/**
+ * @swagger
+ * /api/stats/contributions:
+ *   get:
+ *     summary: Get top volunteer contributions
+ *     tags: [Stats]
+ *     parameters:
+ *       - in: query
+ *         name: labelOneId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: labelTwoId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: period
+ *         schema: { type: string, enum: [monthly, all] }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.get('/contributions', cacheResponse((req) => `stats:contrib:${req.user?._id}:${req.query.labelOneId || ''}:${req.query.labelTwoId || ''}:${req.query.teamId || ''}:${req.query.period || 'monthly'}`, 600), asyncHandler(async (req, res) => {
     const db = getDB();
-    const teamIds = await getTargetTeamIds(db, req.query.labelOneId, req.query.labelTwoId);
+    const teamIds = await getTargetTeamIds(db, req.user, req.query.labelOneId, req.query.labelTwoId, req.query.teamId);
     const match = { status: { $in: ['approved', 'Completed'] } };
     if (teamIds) match.teamId = { $in: teamIds };
 

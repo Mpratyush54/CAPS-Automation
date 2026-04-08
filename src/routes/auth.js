@@ -9,6 +9,7 @@ const { cacheGet, cacheSet, cacheDel } = require('../config/redis');
 const { ObjectId } = require('mongodb');
 const { authenticate, authorize } = require('../middleware/auth');
 const { moderateContent } = require('../middleware/moderation');
+const { sendSystemNotification } = require('../utils/notifications');
 
 const router = express.Router();
 
@@ -57,6 +58,36 @@ function generatePassword(length = 10) {
  *   post:
  *     summary: Register a new user
  *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, email, password]
+ *             properties:
+ *               name: { type: string }
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *               role: { type: string, enum: [Volunteer, Team Lead, Admin, Super Admin] }
+ *               avatar: { type: string }
+ *               profession: { type: string }
+ *               expertise: { type: string }
+ *     responses:
+ *       201:
+ *         description: Account created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string }
+ *                 token: { type: string }
+ *                 user: { $ref: '#/components/schemas/User' }
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       409:
+ *         description: Conflict - Email already registered
  */
 router.post('/signup', moderateContent(['name', 'profession', 'expertise']), async (req, res) => {
     try {
@@ -127,9 +158,38 @@ router.post('/signup', moderateContent(['name', 'profession', 'expertise']), asy
 });
 
 // ──────────────── POST /api/auth/login ────────────────
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Authenticate and get session tokens
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *               fingerprint: { type: string, description: "Unique device identifier for security tracking" }
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token: { type: string }
+ *                 refreshToken: { type: string }
+ *                 user: { type: object }
+ */
 router.post('/login', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, fingerprint } = req.body;
 
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password are required.' });
@@ -145,7 +205,7 @@ router.post('/login', async (req, res) => {
         if (user.banned) {
             return res.status(403).json({ error: 'Your account has been suspended.' });
         }
-        
+
         // Auto-verify users if they aren't already (compat with old system)
         if (user.verified === false) {
             await db.collection('users').updateOne({ _id: user._id }, { $set: { verified: true } });
@@ -173,20 +233,54 @@ router.post('/login', async (req, res) => {
             user: sanitizeUser(user),
         });
 
-        // Background notification for security visibility
-        const { sendSystemNotification } = require('../utils/notifications');
-        sendSystemNotification(user._id, {
-            title: 'New Login Detected 🛡️',
-            body: `A new session was started successfully for your account.`,
-            type: 'security',
-            url: '/profile'
-        }).catch(() => {});
+        // Device-aware security visibility
+        // Only notify if this is a genuinely NEW device fingerprint for this user
+        let isKnownDevice = false;
+        if (fingerprint) {
+            const existingMatch = await db.collection('pushSubscriptions').findOne({
+                userId: user._id,
+                fingerprint: fingerprint
+            });
+            if (existingMatch) isKnownDevice = true;
+        }
+
+        if (!isKnownDevice) {
+            console.log(`🛡️ [AUTH-SECURITY] New device fingerprint detected for user: ${user.name} (${fingerprint || 'no-fingerprint'})`);
+            sendSystemNotification(user._id, {
+                title: 'New Login Detected 🛡️',
+                body: `A new session was started successfully from an unrecognized device hardware.`,
+                type: 'security',
+                url: '/profile',
+                fromRoleLabel: 'Security'
+            }).catch(() => { });
+        } else {
+            console.log(`🛡️ [AUTH-SECURITY] Login from known device: ${user.name} (FP: ${fingerprint})`);
+        }
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ error: 'Login failed.' });
     }
 });
 
+/**
+ * @swagger
+ * /api/auth/refresh:
+ *   post:
+ *     summary: Refresh session using a refresh token
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
 router.post('/refresh', async (req, res) => {
     try {
         const { refreshToken } = req.body;
@@ -219,10 +313,30 @@ router.post('/refresh', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Get currently authenticated user data
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
 router.get('/me', authenticate, (req, res) => {
     res.json({ user: req.user });
 });
 
+/**
+ * @swagger
+ * /api/auth/change-password:
+ *   post:
+ *     summary: Change user password while logged in
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
 router.post('/change-password', authenticate, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -250,6 +364,38 @@ router.post('/change-password', authenticate, async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/auth/bulk-create:
+ *   post:
+ *     summary: Create multiple users at once (Admin only)
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [users]
+ *             properties:
+ *               users:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [name, email]
+ *                   properties:
+ *                     name: { type: string }
+ *                     email: { type: string, format: email }
+ *                     role: { type: string }
+ *     responses:
+ *       201:
+ *         $ref: '#/components/responses/Created'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ */
 router.post('/bulk-create', authenticate, authorize('Admin'), async (req, res) => {
     try {
         const { users } = req.body;
@@ -260,21 +406,21 @@ router.post('/bulk-create', authenticate, authorize('Admin'), async (req, res) =
         const results = [];
         const failed = [];
         for (const userData of users) {
-             const { name, email, role } = userData;
-             const plainPassword = generatePassword(10);
-             const hashedPassword = await bcrypt.hash(plainPassword, 10);
-             const newUser = {
-                 name: name.trim(),
-                 email: email.toLowerCase().trim(),
-                 password: hashedPassword,
-                 role: role || ROLES.VOLUNTEER,
-                 avatar: '👤',
-                 verified: true,
-                 createdAt: new Date(),
-                 updatedAt: new Date(),
-             };
-             const result = await db.collection('users').insertOne(newUser);
-             results.push({ id: result.insertedId.toString(), name: newUser.name, email: newUser.email, role: newUser.role, password: plainPassword });
+            const { name, email, role } = userData;
+            const plainPassword = generatePassword(10);
+            const hashedPassword = await bcrypt.hash(plainPassword, 10);
+            const newUser = {
+                name: name.trim(),
+                email: email.toLowerCase().trim(),
+                password: hashedPassword,
+                role: role || ROLES.VOLUNTEER,
+                avatar: '👤',
+                verified: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            };
+            const result = await db.collection('users').insertOne(newUser);
+            results.push({ id: result.insertedId.toString(), name: newUser.name, email: newUser.email, role: newUser.role, password: plainPassword });
         }
         res.status(201).json({ message: `Created ${results.length} users.`, users: results });
     } catch (err) {
@@ -282,6 +428,19 @@ router.post('/bulk-create', authenticate, authorize('Admin'), async (req, res) =
     }
 });
 
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Terminate current session and clear server-side cache
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.post('/logout', authenticate, async (req, res) => {
     try {
         await cacheDel(`user:${req.user._id}`);

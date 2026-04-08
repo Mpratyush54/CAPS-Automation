@@ -136,6 +136,19 @@ router.get('/contributions', cacheResponse((req) => `reports:contrib:${req.user?
         ok(res, payload);
 }));
 
+/**
+ * @swagger
+ * /api/reports:
+ *   get:
+ *     summary: List report center rows across weekly and derived reports
+ *     tags: [Reports]
+ *     responses:
+ *       200:
+ *         description: Consolidated report list with metrics
+ *         $ref: '#/components/responses/PaginatedOk'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/', asyncHandler(async (req, res) => {
         const db = getDB();
         const { page, pageSize, skip } = parsePagination(req.query);
@@ -440,29 +453,6 @@ router.get('/weekly', async (req, res) => {
 
 /**
  * @swagger
- * /api/reports/moms:
- *   get:
- *     summary: List MOM entries for the report center
- *     tags: [Reports]
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- *   post:
- *     summary: Create a MOM entry from the report center flow
- *     tags: [Reports]
- *     responses:
- *       201:
- *         $ref: '#/components/responses/Created'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- */
-
-/**
- * @swagger
  * /api/reports/period:
  *   get:
  *     summary: List period reports
@@ -634,5 +624,70 @@ router.post('/events/:eventId/generate', async (req, res) => {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
     }
 });
+
+/**
+ * @swagger
+ * /api/reports/aggregate:
+ *   get:
+ *     summary: Aggregate event metrics (Participation, Budget, Beneficiaries) across a period
+ *     tags: [Reports]
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema: { type: string, enum: [monthly, yearly] }
+ *       - in: query
+ *         name: year
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: month
+ *         schema: { type: integer, description: "1-12, required if type is monthly" }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
+router.get('/aggregate', requireRoles([ROLES.ADMIN, ROLES.SUPER_ADMIN]), asyncHandler(async (req, res) => {
+    const { type, year, month } = req.query;
+    const db = getDB();
+
+    let dateRange;
+    if (type === 'monthly') {
+        const start = new Date(year, month - 1, 1);
+        const end = new Date(year, month, 0, 23, 59, 59);
+        dateRange = { $gte: start, $lte: end };
+    } else {
+        const start = new Date(year, 0, 1);
+        const end = new Date(year, 11, 31, 23, 59, 59);
+        dateRange = { $gte: start, $lte: end };
+    }
+
+    const events = await db.collection('events').find({ date: dateRange }).toArray();
+    const eventIds = events.map(e => e._id);
+    const reports = await db.collection('eventReports').find({ eventId: { $in: eventIds } }).toArray();
+
+    const stats = {
+        totalEvents: events.length,
+        totalAttendance: 0,
+        budget: 0,
+        beneficiaries: { students: 0, faculty: 0, other: 0 },
+        breakdown: {} // count by category
+    };
+
+    reports.forEach(r => {
+        const data = r.formData || {};
+        stats.totalAttendance += Number(data.attendance || 0);
+        stats.budget += Number(data.budgetSpent || 0);
+        
+        if (data.beneficiaries) {
+            stats.beneficiaries.students += Number(data.beneficiaries.students || 0);
+            stats.beneficiaries.faculty += Number(data.beneficiaries.faculty || 0);
+            stats.beneficiaries.other += Number(data.beneficiaries.other || 0);
+        }
+
+        const cat = events.find(e => String(e._id) === String(r.eventId))?.category || 'General';
+        stats.breakdown[cat] = (stats.breakdown[cat] || 0) + 1;
+    });
+
+    ok(res, stats);
+}));
 
 module.exports = router;

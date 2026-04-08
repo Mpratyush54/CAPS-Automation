@@ -73,6 +73,26 @@ async function countHours(db, match, period = 'weekly') {
 
 /* -------------------- ROUTE -------------------- */
 
+/**
+ * @swagger
+ * /api/dashboard:
+ *   get:
+ *     summary: Get role-aware dashboard summary and KPIs
+ *     tags: [Dashboard]
+ *     parameters:
+ *       - in: query
+ *         name: roleView
+ *         schema: { type: string, enum: [auto, volunteer, lead, admin] }
+ *     responses:
+ *       200:
+ *         description: Dashboard overview for the current user
+ *         content:
+ *           'application/json':
+ *             schema:
+ *               $ref: '#/components/schemas/DashboardResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.query.roleView || 'auto'}:${req.query.dateFrom || ''}:${req.query.dateTo || ''}`, 300), asyncHandler(async (req, res) => {
     const db = getDB();
     const user = req.user;
@@ -91,6 +111,7 @@ router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.qu
                 { userId } // Events specifically assigned to them
             ]
         });
+        const myMomsCount = await db.collection('moms').countDocuments({ preparedBy: userId });
         const weeklyHoursChart = await getWeeklyChart(db, { userId });
         const payload = {
             role,
@@ -98,6 +119,7 @@ router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.qu
             kpis: [
                 { key: 'myHoursWeek', label: 'My Hours (Week)', value: weekly.hours, unit: 'h' },
                 { key: 'myTaskCount', label: 'My Tasks', value: weekly.logs },
+                { key: 'myMomsCount', label: 'MOMs Submitted', value: myMomsCount },
                 { key: 'assignedEventsCount', label: 'Events Assigned', value: assignedEventsCount },
             ],
             sections: { myTasks: [], weeklyHoursChart },
@@ -133,7 +155,7 @@ router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.qu
                 { key: 'teamMembersCount', label: 'Team Members', value: teamMembersCount },
                 { key: 'teamHoursWeek', label: 'Team Hours (Week)', value: teamHoursWeek.hours, unit: 'h' },
                 { key: 'pendingTasksCount', label: 'Pending Approvals', value: pendingApprovalsCount },
-                { key: 'logsSubmittedCount', label: 'Logs Submitted', value: teamHoursWeek.logs },
+                { key: 'teamMomsCount', label: 'Team MOMs', value: await db.collection('moms').countDocuments({ teamId }) },
             ],
             sections: { teamLogsToday, committeeHoursWeekChart },
         };
@@ -172,7 +194,7 @@ router.get('/', cacheResponse((req) => `dashboard:user:${req.user?._id}:${req.qu
                 { key: role === ROLES.SUPER_ADMIN ? 'totalMembers' : 'wingMembers', label: 'Members', value: membersCount },
                 { key: role === ROLES.SUPER_ADMIN ? 'activeWings' : 'committeesCount', label: role === ROLES.SUPER_ADMIN ? 'Wings' : 'Committees', value: subUnitsCount },
                 { key: role === ROLES.SUPER_ADMIN ? 'totalHoursWeek' : 'wingHoursWeek', label: 'Hours (Week)', value: orgHoursWeek.hours, unit: 'h' },
-                { key: role === ROLES.SUPER_ADMIN ? 'globalEvents' : 'activeEvents', label: 'Active Events', value: activeEvents },
+                { key: 'orgMomsCount', label: 'Total MOMs', value: await db.collection('moms').countDocuments(scopeMatch) },
             ],
             sections: { 
                 unitPerformanceRows, 

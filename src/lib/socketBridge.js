@@ -9,9 +9,22 @@ module.exports = {
     },
     emitToUser: (userId, event, data) => {
         if (ioInstance) {
-            ioInstance.to(`user:${userId}`).emit(event, data);
-            return true;
+            const userIdStr = String(userId).toLowerCase();
+            const room = `user:${userIdStr}`;
+            
+            // Diagnostics
+            const roomSize = ioInstance.sockets.adapter.rooms.get(room)?.size || 0;
+            
+            ioInstance.to(room).emit(event, data);
+            
+            if (roomSize === 0) {
+                console.warn(`⚠️ [SOCKET] Room ${room} is empty. ID Length: ${userIdStr.length}, Type: ${typeof userId}`);
+            } else {
+                console.log(`📡 [SOCKET] Delivered to ${room} (${roomSize} socket(s) active).`);
+            }
+            
+            return { sent: true, roomSize };
         }
-        return false;
+        return { sent: false, roomSize: 0 };
     }
 };

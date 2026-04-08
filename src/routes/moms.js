@@ -1,6 +1,10 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { getDB } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
+const { enqueue, QUEUES } = require('../utils/queue');
+const DriveFile = require('../models/DriveFile');
 const {
     MOM_STATUSES,
     isLeadLike,
@@ -15,6 +19,52 @@ const { ok, created, fail } = require('../utils/api');
 const router = express.Router();
 
 router.use(authenticate);
+
+// Default categories if collection is empty
+const DEFAULT_CATEGORIES = ['Wings', 'Committees', 'Sr. Trainers', 'Projects', 'Clubs', 'EC'];
+
+/**
+ * @swagger
+ * /api/moms/categories:
+ *   get:
+ *     summary: List meeting categories
+ */
+router.get('/categories', async (req, res) => {
+    try {
+        const db = getDB();
+        const items = await db.collection('momCategories').find().toArray();
+        const names = items.length > 0 ? items.map(i => i.name) : DEFAULT_CATEGORIES;
+        ok(res, { items: names });
+    } catch (error) {
+        fail(res, 400, 'VALIDATION_ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/moms/categories:
+ *   post:
+ *     summary: Add a meeting category
+ */
+router.post('/categories', async (req, res) => {
+    if (![MOM_STATUSES.ADMIN, 'Admin', 'Super Admin'].includes(req.user.role)) {
+        return fail(res, 403, 'FORBIDDEN', 'Insufficient permissions.');
+    }
+    try {
+        const { name } = req.body;
+        if (!name) return fail(res, 400, 'VALIDATION_ERROR', 'Category name is required.');
+        
+        const db = getDB();
+        await db.collection('momCategories').updateOne(
+            { name: String(name).trim() },
+            { $set: { name: String(name).trim(), createdAt: new Date() } },
+            { upsert: true }
+        );
+        ok(res, { success: true });
+    } catch (error) {
+        fail(res, 400, 'VALIDATION_ERROR', error.message);
+    }
+});
 
 /**
  * @swagger
@@ -64,32 +114,44 @@ router.use(authenticate);
  */
 router.post('/', async (req, res) => {
     try {
-        const { title, meetingDate, status = 'draft', attendees = [], agenda = [], notes = [], actionItems = [], wingId, committeeId } = req.body;
-        if (!title || !meetingDate) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'title and meetingDate are required.');
-        }
-        if (agenda.length === 0 && notes.length === 0 && actionItems.length === 0) {
-            return fail(res, 400, 'VALIDATION_ERROR', 'At least one of notes, agenda, or actionItems is required.');
-        }
-        assertAllowedStatus(status, MOM_STATUSES, 'status');
+        const { 
+            title, meetingDate, 
+            category, meetingType, attendees, agenda, 
+            pointsDiscussed, deadlinesSet, photos = [],
+            wingId, committeeId, teamId 
+        } = req.body;
 
-        const scoped = resolveScopedFields(req.user, { wingId, committeeId });
+        if (!title || !meetingDate || !category) {
+            return fail(res, 400, 'VALIDATION_ERROR', 'title, meetingDate, and category are required.');
+        }
+
+        const scoped = resolveScopedFields(req.user, { wingId, committeeId, teamId: teamId || req.user.teamId });
+        
+        let finalStatus = 'approved';
+        if (req.user.role === 'Volunteer' || req.user.role === 'Team Lead') {
+            finalStatus = 'pending_approval';
+        }
+        // If user explicitly sent 'draft', respect it
+        if (req.body.status === 'draft') finalStatus = 'draft';
+
         const doc = {
             title: String(title).trim(),
             meetingDate: parseDate(meetingDate, 'meetingDate'),
+            category, // Wings, Committees, Sr. Trainers, Projects, Clubs, EC
+            meetingType,
+            attendees: String(attendees || '').trim(),
+            agenda: String(agenda || '').trim(),
+            pointsDiscussed: String(pointsDiscussed || '').trim(),
+            deadlinesSet: String(deadlinesSet || '').trim(),
+            photos: Array.isArray(photos) ? photos : [],
             preparedBy: parseObjectId(req.user._id, '_id'),
+            preparedByName: req.user.name,
+            preparedByRole: req.user.role,
+            teamId: scoped.teamId,
             wingId: scoped.wingId,
             committeeId: scoped.committeeId,
             scopeSource: scoped.scopeSource,
-            status,
-            attendees: Array.isArray(attendees) ? attendees : [],
-            agenda: Array.isArray(agenda) ? agenda : [],
-            notes: Array.isArray(notes) ? notes : [],
-            actionItems: Array.isArray(actionItems) ? actionItems.map((item) => ({
-                text: item.text,
-                ownerUserId: parseObjectId(item.ownerUserId, 'ownerUserId'),
-                dueDate: item.dueDate ? parseDate(item.dueDate, 'dueDate') : null,
-            })) : [],
+            status: finalStatus,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -97,6 +159,39 @@ router.post('/', async (req, res) => {
         const db = getDB();
         const result = await db.collection('moms').insertOne(doc);
         doc._id = result.insertedId;
+
+        // --- NOTIFICATION LOGIC ---
+        // Same as for logs: Notify Team Lead if a Volunteer submits
+        if (req.user.role === 'Volunteer' && (doc.teamId || doc.wingId || doc.committeeId)) {
+            const { sendSystemNotification, notifyAdmins } = require('../utils/notifications');
+            const targetTeamId = doc.teamId || doc.wingId || doc.committeeId;
+            const team = await db.collection('teamDirectories').findOne({ _id: parseObjectId(targetTeamId) });
+            
+            if (team) {
+                const leads = new Set();
+                if (team.leadUserId) leads.add(String(team.leadUserId));
+                if (Array.isArray(team.leadUserIds)) team.leadUserIds.forEach(id => leads.add(String(id)));
+
+                if (leads.size > 0) {
+                    for (const leadId of leads) {
+                        await sendSystemNotification(leadId, {
+                            title: 'New MOM Submitted 📝',
+                            body: `${req.user.name} submitted a MOM for ${doc.title}`,
+                            type: 'log',
+                            url: `/moms`
+                        });
+                    }
+                } else {
+                    await notifyAdmins({
+                        title: 'Unassigned Team MOM 📋',
+                        body: `${req.user.name} submitted a MOM for ${team.name}, but no lead is assigned.`,
+                        type: 'log',
+                        url: `/moms`
+                    });
+                }
+            }
+        }
+
         created(res, doc);
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
@@ -114,6 +209,20 @@ router.post('/', async (req, res) => {
  *         name: id
  *         required: true
  *         schema: { type: string }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title: { type: string }
+ *               meetingDate: { type: string, format: date-time }
+ *               status: { type: string }
+ *               attendees: { type: array, items: { type: string } }
+ *               agenda: { type: array, items: { type: string } }
+ *               notes: { type: array, items: { type: string } }
+ *               actionItems: { type: array, items: { type: object } }
  *     responses:
  *       200:
  *         $ref: '#/components/responses/Ok'
@@ -236,10 +345,121 @@ router.get('/', async (req, res) => {
         if (req.query.wingId) filter.wingId = parseObjectId(req.query.wingId, 'wingId');
         if (req.query.committeeId) filter.committeeId = parseObjectId(req.query.committeeId, 'committeeId');
 
-        const items = await db.collection('moms').find(filter).sort({ meetingDate: -1, updatedAt: -1 }).toArray();
+        const pipeline = [
+            { $match: filter },
+            { $sort: { meetingDate: -1, updatedAt: -1 } },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'preparedBy',
+                    foreignField: '_id',
+                    as: 'user'
+                }
+            },
+            {
+                $addFields: {
+                    preparedByName: { $arrayElemAt: ['$user.name', 0] }
+                }
+            },
+            {
+                $project: { user: 0 }
+            }
+        ];
+
+        const items = await db.collection('moms').aggregate(pipeline).toArray();
         ok(res, { items });
     } catch (error) {
         fail(res, 400, 'VALIDATION_ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/moms/{id}/photos/upload-url:
+ *   post:
+ *     summary: Request upload metadata for MOM photos
+ *     tags: [MOMs]
+ */
+router.post('/:id/photos/upload-url', async (req, res) => {
+    try {
+        const momId = parseObjectId(req.params.id, 'id');
+        const files = Array.isArray(req.body.files) ? req.body.files : [];
+        if (files.length === 0) return fail(res, 400, 'VALIDATION_ERROR', 'No files provided.');
+
+        const docs = files.map(file => ({
+            momId,
+            uploadedBy: parseObjectId(req.user._id, '_id'),
+            fileName: file.fileName,
+            mimeType: file.mimeType || 'image/jpeg',
+            sizeBytes: Number(file.sizeBytes || 0),
+            status: 'pending_upload',
+            createdAt: new Date(),
+        }));
+
+        const db = getDB();
+        await db.collection('driveFiles').insertMany(docs);
+
+        ok(res, {
+            items: docs.map(doc => ({
+                id: doc._id,
+                fileName: doc.fileName,
+                uploadUrl: `/api/moms/${momId}/photos/${doc._id}/resumable`
+            }))
+        });
+    } catch (error) {
+        fail(res, 400, 'VALIDATION_ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/moms/{id}/photos/{photoId}/resumable:
+ *   patch:
+ *     summary: Stream photo content for MOM
+ */
+router.patch('/:id/photos/:photoId/resumable', async (req, res) => {
+    try {
+        const db = getDB();
+        const momId = parseObjectId(req.params.id, 'id');
+        const photoId = parseObjectId(req.params.photoId, 'photoId');
+
+        const fileMeta = await db.collection('driveFiles').findOne({ _id: photoId, momId });
+        if (!fileMeta) return res.status(404).json({ error: 'Photo record not found.' });
+
+        const offset = parseInt(req.headers['x-offset'] || '0', 10);
+        const totalSize = parseInt(req.headers['x-total-size'] || String(fileMeta.sizeBytes), 10);
+
+        const uploadDir = path.join(__dirname, '../../temp/uploads/moms', String(momId));
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        const filePath = path.join(uploadDir, fileMeta.fileName);
+        const writeStream = fs.createWriteStream(filePath, { flags: offset === 0 ? 'w' : 'a', start: offset });
+
+        req.pipe(writeStream);
+
+        writeStream.on('finish', async () => {
+            const stats = fs.statSync(filePath);
+            if (stats.size >= totalSize) {
+                await db.collection('driveFiles').updateOne(
+                    { _id: photoId },
+                    { $set: { status: 'ready_to_sync', localPath: filePath, updatedAt: new Date() } }
+                );
+
+                await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
+                    momId: String(momId),
+                    photoId: String(photoId),
+                    fileName: fileMeta.fileName,
+                    localPath: filePath,
+                    uploadedBy: String(req.user._id),
+                });
+
+                res.json({ success: true, status: 'complete' });
+            } else {
+                res.json({ success: true, status: 'partial', received: stats.size });
+            }
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
     }
 });
 

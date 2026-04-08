@@ -14,7 +14,7 @@ const MOM_STATUSES = new Set(['draft', 'under_review', 'published']);
 const EVENT_REPORT_STATUSES = new Set(['draft', 'ready', 'published']);
 
 function parseObjectId(value, fieldName) {
-    if (value === null || value === undefined || value === '') {
+    if (value === null || value === undefined || value === '' || value === 'null' || value === 'undefined') {
         return null;
     }
 

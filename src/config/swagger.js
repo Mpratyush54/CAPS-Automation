@@ -64,11 +64,12 @@ const swaggerDefinition = {
       ScopeFields: {
         type: 'object',
         properties: {
+          teamId: { type: 'string', nullable: true },
           wingId: { type: 'string', nullable: true },
           committeeId: { type: 'string', nullable: true },
           scopeSource: {
             type: 'string',
-            enum: ['inherited_user_scope', 'manually_selected_scope'],
+            enum: ['inherited_user_scope', 'manually_selected_scope', 'self_selected_during_transition'],
           },
         },
       },
@@ -110,7 +111,7 @@ const swaggerDefinition = {
               durationMinutes: { type: 'number' },
               status: {
                 type: 'string',
-                enum: ['draft', 'in_progress', 'pending_review', 'needs_revision', 'approved'],
+                enum: ['draft', 'in_progress', 'pending_review', 'needs_revision', 'approved', 'Pending Review', 'Completed', 'Needs Revision'],
               },
               tag: { type: 'string' },
               submittedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -203,7 +204,7 @@ const swaggerDefinition = {
               startTime: { type: 'string' },
               location: { type: 'string' },
               scope: { type: 'string', enum: ['committee', 'wing', 'mixed', 'global'] },
-              status: { type: 'string', enum: ['upcoming', 'ongoing', 'completed', 'cancelled'] },
+              status: { type: 'string', enum: ['Upcoming', 'Ongoing', 'Completed', 'Cancelled'] },
               createdBy: { type: 'string' },
               attendeeCount: { type: 'number' },
               photoSync: {
@@ -226,7 +227,7 @@ const swaggerDefinition = {
         properties: {
           _id: { type: 'string' },
           eventId: { type: 'string' },
-          status: { type: 'string', enum: ['draft', 'ready', 'published'] },
+          status: { type: 'string', enum: ['Draft', 'Ready', 'Published'] },
           summary: { type: 'string' },
           outcomes: { type: 'array', items: { type: 'string' } },
           metrics: {
@@ -278,18 +279,11 @@ const swaggerDefinition = {
         type: 'object',
         properties: {
           _id: { type: 'string' },
-          type: { type: 'string', enum: ['info', 'warning', 'success', 'event', 'compliance'] },
+          type: { type: 'string', enum: ['info', 'warning', 'success', 'event', 'compliance', 'security', 'log', 'approval', 'revision'] },
           title: { type: 'string' },
           body: { type: 'string' },
           recipientUserId: { type: 'string' },
           sourceType: { type: 'string', enum: ['system', 'user', 'report_job'] },
-          sourceRef: {
-            type: 'object',
-            properties: {
-              entityType: { type: 'string', nullable: true },
-              entityId: { type: 'string', nullable: true },
-            },
-          },
           isRead: { type: 'boolean' },
           createdAt: { type: 'string', format: 'date-time' },
         },
@@ -305,7 +299,7 @@ const swaggerDefinition = {
           mimeType: { type: 'string' },
           sizeBytes: { type: 'number' },
           folderId: { type: 'string', nullable: true },
-          status: { type: 'string', enum: ['uploaded', 'failed'] },
+          status: { type: 'string', enum: ['pending_upload', 'ready_to_sync', 'synced', 'failed'] },
           createdAt: { type: 'string', format: 'date-time' },
         },
       },
@@ -313,13 +307,12 @@ const swaggerDefinition = {
         type: 'object',
         properties: {
           _id: { type: 'string' },
-          labelOneWingId: { type: 'string', nullable: true },
-          labelTwoCommitteeId: { type: 'string', nullable: true },
-          labelOneName: { type: 'string' },
-          labelTwoName: { type: 'string' },
+          type: { type: 'string', enum: ['wing', 'committee'] },
+          name: { type: 'string' },
+          description: { type: 'string' },
           leadUserId: { type: 'string', nullable: true },
-          focus: { type: 'string' },
-          memberCount: { type: 'number' },
+          leadUserIds: { type: 'array', items: { type: 'string' } },
+          memberIds: { type: 'array', items: { type: 'string' } },
           isActive: { type: 'boolean' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },

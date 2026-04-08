@@ -12,6 +12,8 @@ const {
 const { ok, created, fail, parsePagination } = require('../utils/api');
 const WorkLog = require('../models/WorkLog');
 const { getDB } = require('../config/database');
+const { sendSystemNotification, notifyAdmins } = require('../utils/notifications');
+const { parseObjectId: pId } = require('../utils/worklog');
 
 const router = express.Router();
 
@@ -178,10 +180,36 @@ router.post('/committees', async (req, res) => {
  *       - in: query
  *         name: userId
  *         schema: { type: string }
- *         description: Admin and Super Admin only
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *       - in: query
+ *         name: dateFrom
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: dateTo
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: pageSize
+ *         schema: { type: integer, default: 50 }
  *     responses:
  *       200:
- *         $ref: '#/components/responses/PaginatedOk'
+ *         description: Paginated logs with status counters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/PaginatedEnvelope'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         rows: { type: array, items: { $ref: '#/components/schemas/WorkLog' } }
+ *                         counters: { type: object, additionalProperties: { type: integer } }
  *       400:
  *         $ref: '#/components/responses/BadRequest'
  *       401:
@@ -278,12 +306,15 @@ router.get('/logs', async (req, res) => {
  *               description: { type: string }
  *               workDate: { type: string, format: date-time }
  *               durationMinutes: { type: number }
+ *               hours: { type: number }
+ *               minutes: { type: number }
  *               status:
  *                 type: string
  *                 enum: [draft, in_progress, pending_review, needs_revision, approved]
  *               tag: { type: string }
  *               wingId: { type: string, nullable: true }
  *               committeeId: { type: string, nullable: true }
+ *               teamId: { type: string, nullable: true }
  *     responses:
  *       201:
  *         $ref: '#/components/responses/Created'
@@ -407,33 +438,43 @@ router.post('/logs', async (req, res) => {
  *         $ref: '#/components/responses/Unauthorized'
  *       404:
  *         $ref: '#/components/responses/NotFound'
+ */
+router.get('/logs/:id', async (req, res) => {
+    try {
+        const item = await WorkLog.findOne({ _id: parseObjectId(req.params.id, 'id') });
+        if (!item) return fail(res, 404, 'NOT_FOUND', 'Log not found.');
+        return ok(res, item);
+    } catch (error) {
+        return fail(res, 400, 'VALIDATION_ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/logs/{id}:
  *   patch:
- *     summary: Update a work log
+ *     summary: Update an existing work log
  *     tags: [Work Logs]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema: { type: string }
- *     responses:
- *       200:
- *         $ref: '#/components/responses/Ok'
- *       400:
- *         $ref: '#/components/responses/BadRequest'
- *       401:
- *         $ref: '#/components/responses/Unauthorized'
- *       403:
- *         $ref: '#/components/responses/Forbidden'
- *       404:
- *         $ref: '#/components/responses/NotFound'
- *   delete:
- *     summary: Delete an eligible work log
- *     tags: [Work Logs]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: string }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title: { type: string }
+ *               description: { type: string }
+ *               workDate: { type: string, format: date }
+ *               tag: { type: string }
+ *               hours: { type: integer }
+ *               minutes: { type: integer }
+ *               durationMinutes: { type: integer }
+ *               status: { type: string }
  *     responses:
  *       200:
  *         $ref: '#/components/responses/Ok'
@@ -446,36 +487,38 @@ router.post('/logs', async (req, res) => {
  *       404:
  *         $ref: '#/components/responses/NotFound'
  */
-router.get('/logs/:id', async (req, res) => {
-    try {
-        const item = await WorkLog.findOne({ _id: parseObjectId(req.params.id, 'id') });
-        if (!item) return fail(res, 404, 'NOT_FOUND', 'Log not found.');
-        return ok(res, item);
-    } catch (error) {
-        return fail(res, 400, 'VALIDATION_ERROR', error.message);
-    }
-});
-
 router.patch('/logs/:id', async (req, res) => {
     try {
         const _id = parseObjectId(req.params.id, 'id');
         const existing = await WorkLog.findOne({ _id });
         if (!existing) return fail(res, 404, 'NOT_FOUND', 'Log not found.');
-        if (String(existing.userId) !== String(req.user._id) && ![ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role)) {
+        
+        const isOwner = String(existing.userId) === String(req.user._id);
+        const isAdmin = [ROLES.ADMIN, ROLES.SUPER_ADMIN].includes(req.user.role);
+        
+        if (!isOwner && !isAdmin) {
             return fail(res, 403, 'FORBIDDEN', 'Insufficient permissions.');
         }
 
         const update = { updatedAt: new Date() };
-        if (req.body.title !== undefined) update.title = req.body.title;
+        if (req.body.title !== undefined) update.title = req.body.title.trim();
         if (req.body.description !== undefined) update.description = req.body.description;
         if (req.body.workDate !== undefined) update.workDate = parseDate(req.body.workDate, 'workDate');
         if (req.body.tag !== undefined) update.tag = req.body.tag;
         if (req.body.status !== undefined) update.status = req.body.status;
+        
         if (req.body.hours !== undefined || req.body.minutes !== undefined || req.body.durationMinutes !== undefined) {
-            update.durationMinutes = Number(req.body.durationMinutes || 0) || ((Number(req.body.hours || 0) * 60) + Number(req.body.minutes || 0));
+             const h = Number(req.body.hours || 0);
+             const m = Number(req.body.minutes || 0);
+             const totalMins = req.body.durationMinutes !== undefined ? Number(req.body.durationMinutes) : (h * 60 + m);
+             update.durationMinutes = totalMins;
         }
 
-        const result = await WorkLog.findOneAndUpdate({ _id }, { $set: update }, { returnDocument: 'after' });
+        const result = await WorkLog.findOneAndUpdate(
+            { _id }, 
+            { $set: update }, 
+            { returnDocument: 'after' }
+        );
         return ok(res, result);
     } catch (error) {
         return fail(res, 400, 'VALIDATION_ERROR', error.message);
@@ -675,6 +718,29 @@ router.post('/logs/:id/reject', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/logs/{id}:
+ *   delete:
+ *     summary: Delete an eligible work log
+ *     tags: [Work Logs]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
 router.delete('/logs/:id', async (req, res) => {
     try {
         const _id = parseObjectId(req.params.id, 'id');

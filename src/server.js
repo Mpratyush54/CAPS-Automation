@@ -151,11 +151,15 @@ Promise.all([pubClient.connect(), subClient.connect()])
 
 // ──────────────── SOCKET CONNECTION MONITORING ────────────────
 io.on('connection', (socket) => {
-    const userId = socket.handshake.query.userId || socket.handshake.auth?.userId;
+    let userId = socket.handshake.query.userId || socket.handshake.auth?.userId;
+    if (userId) userId = String(userId).toLowerCase();
     const fingerprint = socket.handshake.auth?.fingerprint;
 
     if (userId) {
-        socket.join(`user:${userId}`);
+        const room = `user:${userId}`;
+        socket.join(room);
+        console.log(`🔌 [SOCKET] User ${userId} joined room ${room}. Total rooms: ${socket.rooms.size}`);
+        
         const redis = getRedis();
         if (redis) {
             redis.set(`user:active:${userId}`, 'true', 'EX', 300); // Online for 5 mins

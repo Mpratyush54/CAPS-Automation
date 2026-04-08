@@ -1,5 +1,6 @@
 const express = require('express');
 const { getDB } = require('../config/database');
+const { sendSystemNotification, notifyAdmins } = require('../utils/notifications');
 const { authenticate } = require('../middleware/auth');
 const { asyncHandler, requireRoles, cacheResponse } = require('../middleware/api');
 const { parseObjectId, getWeekKey } = require('../utils/worklog');
@@ -10,8 +11,14 @@ const { enqueue, QUEUES } = require('../utils/queue');
 const router = express.Router();
 
 /**
- * GET /api/notifications/public-key
- * Returns the VAPID public key for Web Push subscription.
+ * @swagger
+ * /api/notifications/public-key:
+ *   get:
+ *     summary: Get VAPID public key for Web Push
+ *     tags: [Notifications]
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
  */
 router.get('/public-key', asyncHandler(async (req, res) => {
     const publicKey = process.env.VAPID_PUBLIC_KEY || 'BFZ_pW_L6L-j8m-vB_S_V8_p5_L8_p_R_U_l_W2U_U_V8_p_U_V8_p_U_V';
@@ -170,53 +177,28 @@ router.post('/', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler
     }
 
     // De-duplicate recipients
-    const uniqueRecipients = [...new Set(recipients.map(id => String(id)))].map(id => parseObjectId(id));
+    const uniqueRecipients = [...new Set(recipients.filter(Boolean).map(id => String(id)))].map(id => parseObjectId(id, 'recipientId'));
 
-    const docs = uniqueRecipients.map((recipientUserId) => ({
-        type,
-        title,
-        body,
-        recipientUserId,
-        isRead: false,
-        read: false,
-        fromUserId: parseObjectId(req.user._id, '_id'),
-        fromLabel: req.user.name || 'System',
-        fromRoleLabel: req.user.role,
-        audienceLabel: audienceType === 'specific_role' ? targetRole : audienceType,
-        sourceType: 'manual',
-        sourceRef: { entityType: null, entityId: null },
-        createdAt: new Date(),
-    }));
-
-    let notificationIds = [];
-    if (docs.length > 0) {
-        const result = await db.collection('notifications').insertMany(docs);
-        notificationIds = Object.values(result.insertedIds);
+    if (uniqueRecipients.length > 0) {
+        // Uniform delivery via loop (ensures consistency for each user)
+        await Promise.all(uniqueRecipients.map(recipientId => 
+            sendSystemNotification(recipientId, {
+                title,
+                body,
+                type,
+                fromLabel: req.user.name || 'System',
+                fromRoleLabel: req.user.role,
+                meta: { 
+                    audienceType, 
+                    targetRole,
+                    sourceType: 'manual',
+                    sentBy: req.user._id
+                }
+            })
+        ));
     }
 
-    if (notificationIds.length > 0 && req.io) {
-        uniqueRecipients.forEach((recipientUserId, index) => {
-            const notifDoc = docs[index];
-            if (notifDoc) {
-                req.io.to(`user:${recipientUserId}`).emit('notification:new', {
-                    ...notifDoc,
-                    id: notificationIds[index]
-                });
-            }
-        });
-    }
-
-    await enqueue(QUEUES.NOTIFICATION_SEND, {
-        sentBy: req.user._id,
-        audienceType,
-        targetRole,
-        count: docs.length,
-        notificationIds,
-        type,
-        title,
-    });
-
-    return created(res, { count: docs.length });
+    return created(res, { count: uniqueRecipients.length });
 }));
 
 /**
@@ -263,25 +245,18 @@ router.post('/weekly-reminders/run', requireRoles('Admin', 'Super Admin'), async
             continue;
         }
 
-        const notification = {
-            type: 'compliance',
+        const notificationId = await sendSystemNotification(lead._id, {
             title: 'Weekly report missing',
             body: `Weekly report for ${weekKey} has not been submitted.`,
-            recipientUserId: parseObjectId(lead._id, '_id'),
-            sourceType: 'report_job',
-            sourceRef: {
-                entityType: 'weeklyReport',
-                entityId: null,
-            },
-            isRead: false,
-            read: false,
-            createdAt: new Date(),
-        };
+            type: 'compliance',
+            fromLabel: 'System',
+            fromRoleLabel: 'Compliance',
+            meta: { weekKey, sourceType: 'report_job' }
+        });
 
-        const result = await db.collection('notifications').insertOne(notification);
-        notification._id = result.insertedId;
-        created.push(notification);
-        await cacheDel(`notifications:inbox:${lead._id}:*`);
+        if (notificationId) {
+            created.push({ id: notificationId, recipient: lead.name });
+        }
     }
 
     const queueResult = await enqueue(QUEUES.REPORT_REMINDERS, { weekKey, createdCount: created.length, triggeredBy: req.user._id });
@@ -337,14 +312,17 @@ router.post('/devices', asyncHandler(async (req, res) => {
     const db = getDB();
     const userId = parseObjectId(req.user._id, '_id');
 
-    // UPSERT LOGIC: Use fingerprint as a stable device identifier if provided
-    const matchQuery = fingerprint
-        ? { userId, fingerprint }
-        : { userId, token: typeof token === 'string' ? token : (token.endpoint || 'unknown') };
+    // UPSERT LOGIC: Fingerprint is the the true unique ID for the the the device hardware/browser combo.
+    // If a new user logs in, they 'claim' this fingerprint for their notifications.
+    const matchQuery = fingerprint ? { fingerprint } : { token: typeof token === 'string' ? token : (token.endpoint || 'unknown') };
+    
+    // Check if this is a NEW device or an existing one
+    const existingDevice = await db.collection('pushSubscriptions').findOne(matchQuery);
+    const isNewDevice = !existingDevice;
 
     const doc = {
         userId,
-        token, // Can be a string (dummy/FCM) or object (Web Push Subscription)
+        token, 
         platform,
         deviceName,
         fingerprint: fingerprint || null,
@@ -362,29 +340,18 @@ router.post('/devices', asyncHandler(async (req, res) => {
         { upsert: true, returnDocument: 'after' }
     );
 
-    // TRIGGER WELCOME NOTIFICATION (TEST)
-    const welcomeNotif = {
-        recipientUserId: userId,
-        title: 'Notifications Synced! 🎉',
-        body: `Your ${deviceName} is now ready to receive real-time updates from CAPS Automation.`,
-        type: 'system',
-        status: 'unread',
-        createdAt: new Date()
-    };
-
-    const insertRes = await db.collection('notifications').insertOne(welcomeNotif);
-
-    // Push to delivery queue
-    const { getRedis } = require('../config/redis');
-    const { QUEUES } = require('../utils/queue');
-    const redis = getRedis();
-    if (redis) {
-        await redis.lpush(`queue:${QUEUES.NOTIFICATION_SEND}`, JSON.stringify({
-            payload: { notificationIds: [insertRes.insertedId] }
-        }));
+    // ONLY TRIGGER SECURITY NOTIFICATION for genuinely new device registrations
+    if (isNewDevice) {
+        await sendSystemNotification(userId, {
+            title: 'New Device Authorized! 🛡️',
+            body: `You have successfully linked a new ${deviceName} to your account.`,
+            type: 'security',
+            fromLabel: 'Security',
+            fromRoleLabel: 'System'
+        });
     }
 
-    created(res, { value: result });
+    created(res, { value: result, isNew: isNewDevice });
 }));
 
 /**

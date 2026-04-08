@@ -5,12 +5,13 @@ function asyncHandler(handler) {
     return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
-function requireRoles(...roles) {
+function requireRoles(...allowedRoles) {
+    const flattened = allowedRoles.flat();
     return (req, res, next) => {
         if (!req.user) {
             return fail(res, 401, 'UNAUTHENTICATED', 'Authentication required.');
         }
-        if (!roles.includes(req.user.role)) {
+        if (!flattened.includes(req.user.role)) {
             return fail(res, 403, 'FORBIDDEN', 'Insufficient permissions.');
         }
         next();

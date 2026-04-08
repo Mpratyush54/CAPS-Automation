@@ -23,6 +23,16 @@ router.use(authenticate);
  *   patch:
  *     summary: Update allowed current-user profile fields
  *     tags: [Profile]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               phone: { type: string }
+ *               bio: { type: string }
  *     responses:
  *       200:
  *         $ref: '#/components/responses/Ok'
@@ -67,6 +77,13 @@ router.get('/me', async (req, res) => {
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 10);
 
+    // 3. Fetch Recent Notifications
+    const recentNotifications = await db.collection('notifications')
+        .find({ recipientUserId: userId })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray();
+    
     return ok(res, {
         user: {
             id: user._id,
@@ -87,6 +104,14 @@ router.get('/me', async (req, res) => {
             action: a.action,
             timeLabel: a.createdAt,
             type: a.type
+        })),
+        recentNotifications: recentNotifications.map(n => ({
+            id: n._id,
+            title: n.title,
+            body: n.body,
+            createdAt: n.createdAt,
+            isRead: n.isRead,
+            type: n.type
         })),
         security: { twoFactorEnabled: Boolean(user.security?.twoFactorEnabled) },
     });

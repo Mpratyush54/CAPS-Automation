@@ -130,20 +130,26 @@ async function processDriveSyncJob(payload) {
     }
 
     try {
-        // 1. Fetch event and uploader details to prepare folder/file names
-        const event = await db.collection('events').findOne({ _id: parseObjectId(eventId, 'eventId') });
-        if (!event) throw new Error(`Event ${eventId} not found.`);
-
-        const user = await db.collection('users').findOne({ _id: parseObjectId(uploadedBy, 'uploadedBy') });
+        const user = await db.collection('users').findOne({ _id: parseObjectId(uploadedBy) });
         const username = user?.name?.toLowerCase().replace(/\s+/g, '_') || 'unknown_user';
 
-        // 2. Folder management: Root -> event-photos -> eventName/Id
-        const driveRootId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID; // Optional root from EV
-        const photoRootId = await findOrCreateFolder(drive, 'event-photos', driveRootId);
+        const photoRootId = await findOrCreateFolder(drive, eventId ? 'event-photos' : 'mom-photos', driveRootId);
         
-        // Event specific subfolder
-        const eventFolderName = `${event.title} (${eventId})`;
-        const eventFolderId = await findOrCreateFolder(drive, eventFolderName, photoRootId);
+        let subFolderName;
+        if (eventId) {
+            const event = await db.collection('events').findOne({ _id: parseObjectId(eventId) });
+            if (!event) throw new Error(`Event ${eventId} not found.`);
+            subFolderName = `${event.title} (${eventId})`;
+        } else if (payload.momId) {
+            const mom = await db.collection('moms').findOne({ _id: parseObjectId(payload.momId) });
+            if (!mom) throw new Error(`MOM ${payload.momId} not found.`);
+            // Requirement: Folders name same as MOM ID and Meeting Name
+            subFolderName = `${payload.momId} ${mom.title}`;
+        } else {
+            throw new Error('Neither eventId nor momId provided for sync');
+        }
+
+        const subFolderId = await findOrCreateFolder(drive, subFolderName, photoRootId);
 
         // 3. Prepare target filename: username_date_photoId.ext
         const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
@@ -151,11 +157,11 @@ async function processDriveSyncJob(payload) {
         const targetFileName = `${username}_${dateStr}_${photoId}${ext}`;
 
         // 4. Upload to Drive
-        console.log(`📤 [sync-worker] Uploading "${targetFileName}" (Folder: ${eventFolderName})...`);
+        console.log(`📤 [sync-worker] Uploading "${targetFileName}" (Folder: ${subFolderName})...`);
         const response = await drive.files.create({
             requestBody: {
                 name: targetFileName,
-                parents: [eventFolderId],
+                parents: [subFolderId],
             },
             media: {
                 mimeType: payload.mimeType || 'image/jpeg',
@@ -188,7 +194,7 @@ async function processDriveSyncJob(payload) {
                 $set: {
                     status: 'synced',
                     googleFileId,
-                    folderId: eventFolderId,
+                    folderId: subFolderId,
                     fileName: targetFileName,
                     syncedAt: new Date(),
                     updatedAt: new Date()
@@ -196,11 +202,19 @@ async function processDriveSyncJob(payload) {
             }
         );
 
-        // 7. Update Event record if it doesn't have the folder info yet
-        if (!event.photoSync?.folderId) {
-            await db.collection('events').updateOne(
-                { _id: event._id },
-                { $set: { 'photoSync.folderId': eventFolderId, 'photoSync.status': 'active', 'photoSync.folderName': eventFolderName } }
+        // 7. Update Event/MOM record if it doesn't have the folder info yet
+        if (eventId) {
+            const event = await db.collection('events').findOne({ _id: parseObjectId(eventId) });
+            if (event && !event.photoSync?.folderId) {
+                await db.collection('events').updateOne(
+                    { _id: event._id },
+                    { $set: { 'photoSync.folderId': subFolderId, 'photoSync.status': 'active', 'photoSync.folderName': subFolderName } }
+                );
+            }
+        } else if (payload.momId) {
+            await db.collection('moms').updateOne(
+                { _id: parseObjectId(payload.momId) },
+                { $set: { driveFolderId: subFolderId, driveFolderName: subFolderName } }
             );
         }
 

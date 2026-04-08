@@ -17,6 +17,7 @@ Event.schema = {
     attendeeCount: { type: 'number' },
     assignedRoleVisibility: { type: 'array' },
     teamIds: { type: 'array' },
+    conceptNoteFileId: { type: 'objectId' },
 };
 
 module.exports = Event;

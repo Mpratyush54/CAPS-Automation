@@ -12,13 +12,34 @@ const EventReport = require('../models/EventReport');
 const DriveFile = require('../models/DriveFile');
 const { getDriveClient } = require('../config/google');
 const { enrichEventWithTeams, enrichEventsWithTeams } = require('../utils/event');
+const uuid = require('uuid');
 
 const router = express.Router();
 
 /**
- * Image Proxy Route (Cloudflare Cacheable)
- * Fetches content from Google Drive (or local storage) and streams it with high-TTL cache headers.
- * Placed BEFORE router.use(authenticate) to allow public access and edge caching.
+ * @swagger
+ * /api/events/{id}/photos/{photoId}/view:
+ *   get:
+ *     summary: Get photographic content (Image Proxy)
+ *     tags: [Events]
+ *     description: Streams content from Drive or local storage with high-TTL caching. Publicly accessible.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: photoId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Image binary stream
+ *         content:
+ *           image/*:
+ *             schema: { type: string, format: binary }
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
  */
 router.get('/:id/photos/:photoId/view', async (req, res) => {
     try {
@@ -31,6 +52,8 @@ router.get('/:id/photos/:photoId/view', async (req, res) => {
         // Cache strategy: 7 days
         res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400');
         res.setHeader('Content-Type', photo.mimeType || 'image/jpeg');
+        res.setHeader('Access-Control-Allow-Origin', '*'); // Allow cross-origin caching
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // Explicitly allow cross-origin
 
         // 1. If we have a local path and the sync to Drive hasn't finished (or failed), serve local
         if (photo.localPath && fs.existsSync(photo.localPath)) {
@@ -66,10 +89,36 @@ router.get('/:id/photos/:photoId/view', async (req, res) => {
 });
 
 /**
- * Resumable Binary Stream Upload
- * Supports streaming raw binary data directly to disk.
- * If x-offset is 0, it creates/truncates the file. Otherwise, it appends.
- * Placed BEFORE router.use(authenticate) to avoid 401 on large binary PATCH requests.
+ * @swagger
+ * /api/events/{id}/photos/{photoId}/resumable:
+ *   patch:
+ *     summary: Resumable binary photo upload (Stream)
+ *     tags: [Events]
+ *     description: Accepts raw binary data in chunks. Use `x-offset` and `x-total-size` headers.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: photoId
+ *         required: true
+ *         schema: { type: string }
+ *       - in: header
+ *         name: x-offset
+ *         required: true
+ *         schema: { type: integer }
+ *       - in: header
+ *         name: x-total-size
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/octet-stream:
+ *           schema: { type: string, format: binary }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
  */
 router.patch('/:id/photos/:photoId/resumable', async (req, res) => {
     try {
@@ -158,6 +207,7 @@ router.use(authenticate);
  *               attendeeCount: { type: number }
  *               wingId: { type: string, nullable: true }
  *               committeeId: { type: string, nullable: true }
+ *               teamIds: { type: array, items: { type: string } }
  *     responses:
  *       201:
  *         $ref: '#/components/responses/Created'
@@ -208,6 +258,28 @@ router.post('/', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler
     created(res, enriched);
 }));
 
+/**
+ * @swagger
+ * /api/events:
+ *   get:
+ *     summary: List events filtered by role and squad
+ *     tags: [Events]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: pageSize
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/PaginatedOk'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
 router.get('/', async (req, res) => {
     try {
         const { page, pageSize, skip } = parsePagination(req.query);
@@ -235,6 +307,50 @@ router.get('/', async (req, res) => {
     }
 });
 
+const EventReportTemplate = require('../models/EventReportTemplate');
+
+/**
+ * @swagger
+ * /api/events/templates:
+ *   get:
+ *     summary: List report templates
+ *     tags: [Events]
+ *   post:
+ *     summary: Create or update a template
+ *     tags: [Events]
+ */
+router.get('/templates', requireRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), asyncHandler(async (req, res) => {
+    const templates = await EventReportTemplate.find({}).sort({ createdAt: -1 }).toArray();
+    ok(res, { items: templates });
+}));
+
+router.post('/templates', requireRoles(ROLES.ADMIN, ROLES.SUPER_ADMIN), asyncHandler(async (req, res) => {
+    const { name, description, fields, defaultContent, version, docxFileId } = req.body;
+    
+    const doc = {
+        name,
+        description,
+        fields: fields || [],
+        defaultContent,
+        version: version || 1,
+        docxFileId,
+        createdBy: req.user._id,
+        updatedAt: new Date()
+    };
+
+    let result;
+    const existing = await EventReportTemplate.findOne({ name });
+    if (existing) {
+        result = await EventReportTemplate.findOneAndUpdate({ _id: existing._id }, { $set: doc }, { returnDocument: 'after' });
+    } else {
+        doc.createdAt = new Date();
+        result = await EventReportTemplate.insertOne(doc);
+        doc._id = result.insertedId;
+    }
+
+    ok(res, existing ? result : doc);
+}));
+
 /**
  * @swagger
  * /api/events/{id}:
@@ -261,6 +377,22 @@ router.get('/', async (req, res) => {
  *         name: id
  *         required: true
  *         schema: { type: string }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title: { type: string }
+ *               description: { type: string }
+ *               eventDate: { type: string, format: date-time }
+ *               startTime: { type: string }
+ *               location: { type: string }
+ *               status: { type: string }
+ *               scope: { type: string }
+ *               attendeeCount: { type: number }
+ *               teamIds: { type: array, items: { type: string } }
  *     responses:
  *       200:
  *         $ref: '#/components/responses/Ok'
@@ -503,6 +635,33 @@ router.post('/:id/photos/upload-url', asyncHandler(async (req, res) => {
     });
 }));
 
+/**
+ * @swagger
+ * /api/events/{id}/photos/content:
+ *   post:
+ *     summary: Upload photo content via Base64 fallback
+ *     tags: [Events]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fileName, content]
+ *             properties:
+ *               fileName: { type: string }
+ *               content: { type: string, description: "Base64 encoded file content" }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ */
 router.post('/:id/photos/content', asyncHandler(async (req, res) => {
     const eventId = parseObjectId(req.params.id, 'id');
     const { fileName, content } = req.body; // content is base64
@@ -584,6 +743,21 @@ router.get('/:id/photos', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/events/{id}/photos/summary:
+ *   get:
+ *     summary: Get photographic contribution stats for an event
+ *     tags: [Events]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
 router.get('/:id/photos/summary', requireRoles('Team Lead', 'Admin', 'Super Admin'), asyncHandler(async (req, res) => {
     const eventId = parseObjectId(req.params.id, 'id');
     const db = getDB();
@@ -594,14 +768,14 @@ router.get('/:id/photos/summary', requireRoles('Team Lead', 'Admin', 'Super Admi
         .toArray();
 
     // Get user details for names
-    const userIds = [...new Set(photos.map(p => String(p.uploadedBy)))].map(id => parseObjectId(id));
+    const userIds = [...new Set(photos.map(p => p.uploadedBy).filter(Boolean).map(id => String(id)))].map(id => parseObjectId(id, 'uploadedBy'));
     const users = await db.collection('users')
         .find({ _id: { $in: userIds } })
         .project({ name: 1, role: 1, teamId: 1 })
         .toArray();
 
     // Get team names
-    const teamIds = [...new Set(users.map(u => String(u.teamId)).filter(Boolean))].map(id => parseObjectId(id));
+    const teamIds = [...new Set(users.map(u => u.teamId).filter(Boolean).map(id => String(id)))].map(id => parseObjectId(id, 'teamIds'));
     const teams = await db.collection('teamDirectories')
         .find({ _id: { $in: teamIds } })
         .project({ name: 1 })
@@ -645,6 +819,21 @@ router.get('/:id/photos/summary', requireRoles('Team Lead', 'Admin', 'Super Admi
     return ok(res, { people, teams: teamCounts });
 }));
 
+/**
+ * @swagger
+ * /api/events/{id}/photos/track:
+ *   post:
+ *     summary: Manually track an externally uploaded photo
+ *     tags: [Events]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/Ok'
+ */
 router.post('/:id/photos/track', asyncHandler(async (req, res) => {
     const eventId = parseObjectId(req.params.id, 'id');
     const { googleFileId, fileName, mimeType, sizeBytes } = req.body;
@@ -711,10 +900,269 @@ router.post('/:id/photos/:photoId/retry-sync', requireRoles('Admin', 'Super Admi
     return ok(res, { item: result, queue });
 }));
 
-module.exports = router;
+/**
+ * @swagger
+ * /api/events/templates:
+ *   get:
+ *     summary: List report templates
+ */
+router.get('/templates', async (req, res) => {
+    try {
+        const db = getDB();
+        const items = await db.collection('eventReportTemplates').find({ isActive: true }).toArray();
+        ok(res, { items });
+    } catch (error) {
+        fail(res, 400, 'ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/events/templates:
+ *   post:
+ *     summary: Create report template (Admin)
+ */
+router.post('/templates', requireRoles([ROLES.ADMIN, ROLES.SUPER_ADMIN]), async (req, res) => {
+    try {
+        const { name, description, fields, defaultContent } = req.body;
+        const db = getDB();
+        const doc = {
+            name,
+            description,
+            fields,
+            defaultContent: defaultContent || '',
+            isActive: true,
+            createdBy: parseObjectId(req.user._id),
+            createdAt: new Date()
+        };
+        const result = await db.collection('eventReportTemplates').insertOne(doc);
+        doc._id = result.insertedId;
+        created(res, doc);
+    } catch (error) {
+        fail(res, 400, 'ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/events/{id}/report:
+ *   get:
+ *     summary: Get or create event report
+ */
+router.get('/:id/report', async (req, res) => {
+    try {
+        const eventId = parseObjectId(req.params.id, 'id');
+        const db = getDB();
+        
+        let report = await db.collection('eventReports').findOne({ eventId });
+        if (!report) {
+            // Auto-create initial report draft
+            const result = await db.collection('eventReports').insertOne({
+                eventId,
+                status: 'Draft',
+                ownerUserId: parseObjectId(req.user._id),
+                lastUpdatedAt: new Date()
+            });
+            report = await db.collection('eventReports').findOne({ _id: result.insertedId });
+        }
+        ok(res, report);
+    } catch (error) {
+        fail(res, 400, 'ERROR', error.message);
+    }
+});
+
+router.patch('/:id/report', async (req, res) => {
+    try {
+        const eventId = parseObjectId(req.params.id, 'id');
+        const { templateId, formData, content, blocks, status } = req.body;
+        const db = getDB();
+
+        const update = { lastUpdatedAt: new Date() };
+        if (templateId) update.templateId = parseObjectId(templateId);
+        if (formData) update.formData = formData;
+        if (content) update.content = content;
+        if (blocks) update.blocks = blocks;
+        if (status) update.status = status;
+
+        await db.collection('eventReports').updateOne(
+            { eventId },
+            { $set: update },
+            { upsert: true }
+        );
+        ok(res, { success: true });
+    } catch (error) {
+        fail(res, 400, 'ERROR', error.message);
+    }
+});
+
+/**
+ * @swagger
+ * /api/events/{id}/concept-note/upload-url:
+ *   post:
+ *     summary: Request upload metadata for concept note
+ */
+router.post('/:id/concept-note/upload-url', async (req, res) => {
+    try {
+        const eventId = parseObjectId(req.params.id, 'id');
+        const { fileName, mimeType, sizeBytes } = req.body;
+        
+        const doc = {
+            eventId,
+            uploadedBy: parseObjectId(req.user._id),
+            fileName,
+            mimeType,
+            sizeBytes: Number(sizeBytes),
+            status: 'pending_upload',
+            type: 'concept_note',
+            createdAt: new Date(),
+        };
+
+        const db = getDB();
+        const result = await db.collection('driveFiles').insertOne(doc);
+        
+        ok(res, {
+            id: result.insertedId,
+            uploadUrl: `/api/events/${eventId}/concept-note/${result.insertedId}/resumable`
+        });
+    } catch (error) {
+        fail(res, 400, 'ERROR', error.message);
+    }
+});
+
+router.patch('/:id/concept-note/:fileId/resumable', async (req, res) => {
+    try {
+        const db = getDB();
+        const eventId = parseObjectId(req.params.id, 'id');
+        const fileId = parseObjectId(req.params.fileId, 'fileId');
+
+        const fileMeta = await db.collection('driveFiles').findOne({ _id: fileId, eventId });
+        if (!fileMeta) return res.status(404).json({ error: 'File not found' });
+
+        const offset = parseInt(req.headers['x-offset'] || '0', 10);
+        const totalSize = parseInt(req.headers['x-total-size'] || String(fileMeta.sizeBytes), 10);
+        
+        const uploadDir = path.join(__dirname, '../../temp/uploads/events', String(eventId), 'docs');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        const filePath = path.join(uploadDir, fileMeta.fileName);
+        const writeStream = fs.createWriteStream(filePath, { flags: offset === 0 ? 'w' : 'a', start: offset });
+
+        req.pipe(writeStream);
+
+        writeStream.on('finish', async () => {
+            const stats = fs.statSync(filePath);
+            if (stats.size >= totalSize) {
+                await db.collection('driveFiles').updateOne(
+                    { _id: fileId },
+                    { $set: { status: 'ready_to_sync', localPath: filePath, updatedAt: new Date() } }
+                );
+
+                // Update event record to point to this note
+                await db.collection('events').updateOne(
+                    { _id: eventId },
+                    { $set: { conceptNoteFileId: fileId } }
+                );
+
+                await enqueue(QUEUES.GOOGLE_DRIVE_SYNC, {
+                    eventId: String(eventId),
+                    photoId: String(fileId), // The sync worker uses photoId as general fileId
+                    fileName: fileMeta.fileName,
+                    localPath: filePath,
+                    uploadedBy: String(req.user._id),
+                });
+
+                res.json({ success: true, status: 'complete' });
+            } else {
+                res.json({ success: true, status: 'partial', received: stats.size });
+            }
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+// --------------------------------------------------------------------------
+// REPORT TEMPLATE DOCX STORAGE
+// --------------------------------------------------------------------------
+
+/**
+ * @swagger
+ * /api/events/template-docx/upload-url:
+ *   post:
+ *     summary: Get upload URL for report template DOCX
+ *     tags: [Events]
+ */
+router.post('/template-docx/upload-url', authenticate, requireRoles([ROLES.ADMIN, ROLES.SUPER_ADMIN]), asyncHandler(async (req, res) => {
+    const { fileName, mimeType, sizeBytes } = req.body;
+    
+    // We reuse the drive storage logic
+    const fileId = uuid.v4();
+    const uploadUrl = `/api/events/template-docx/stream/${fileId}`;
+    
+    // Store metadata temporarily
+    const db = getDB();
+    await db.collection('driveFiles').insertOne({
+        _id: fileId,
+        fileName,
+        mimeType,
+        sizeBytes,
+        status: 'pending_template',
+        type: 'report_template',
+        uploadedBy: req.user._id,
+        createdAt: new Date()
+    });
+
+    ok(res, { uploadUrl, fileId });
+}));
+
+/**
+ * Stream handler for template DOCX
+ */
+router.patch('/template-docx/stream/:fileId', authenticate, requireRoles([ROLES.ADMIN, ROLES.SUPER_ADMIN]), (req, res) => {
+    const fileId = req.params.fileId;
+    const db = getDB();
+    const uploadDir = path.join(process.cwd(), 'uploads', 'templates');
+    
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    
+    const filePath = path.join(uploadDir, `${fileId}.docx`);
+    const writeStream = fs.createWriteStream(filePath);
+    
+    req.pipe(writeStream);
+    
+    writeStream.on('finish', async () => {
+        await db.collection('driveFiles').updateOne(
+            { _id: fileId },
+            { $set: { status: 'uploaded', path: filePath, updatedAt: new Date() } }
+        );
+        res.status(200).send({ status: 'OK' });
+    });
+
+    writeStream.on('error', (err) => {
+        res.status(500).send({ error: err.message });
+    });
+});
 
 /**
  * Image Proxy Route (Cloudflare Cacheable)
  * Fetches content from Google Drive and streams it with high-TTL cache headers.
  */
+router.get('/:id/photos/:photoId/view', asyncHandler(async (req, res) => {
+    const db = getDB();
+    const photo = await db.collection('driveFiles').findOne({ 
+        _id: parseObjectId(req.params.photoId), 
+        eventId: parseObjectId(req.params.id) 
+    });
 
+    if (!photo) return res.status(404).send('Photo not found');
+
+    if (photo.localPath && fs.existsSync(photo.localPath)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Content-Type', photo.mimeType || 'image/jpeg');
+        return fs.createReadStream(photo.localPath).pipe(res);
+    }
+
+    return res.status(404).send('Photo content not available locally.');
+}));
+
+module.exports = router;
