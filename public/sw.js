@@ -6,16 +6,26 @@ self.addEventListener('push', (event) => {
     if (!event.data) return;
     
     try {
-        const data = event.data.json();
-        const { title, body, icon, url, id } = data;
+        const payload = event.data.json();
+        console.log('📦 [PWA] Push received:', payload);
+        const { title, body, icon, badge, data, vibrate, requireInteraction, actions } = payload;
+        
+        // Extract nested data if available (supports both shallow and deep formats)
+        const metadata = data || {};
+        const urlToOpen = metadata.url || payload.url || '/notifications';
         
         const options = {
-            body: body || 'You have a new update.',
-            icon: icon || '/logo192.png',
-            badge: '/logo192.png',
-            data: { url: url || '/notifications', id },
-            vibrate: [100, 50, 100],
-            actions: [
+            body: body || 'New update available.',
+            icon: icon || '/favicon.svg',
+            badge: badge || '/favicon.svg',
+            data: { 
+                url: urlToOpen, 
+                id: metadata.id || payload.id || null,
+                timestamp: metadata.timestamp || new Date().getTime()
+            },
+            vibrate: vibrate || [200, 100, 200],
+            requireInteraction: requireInteraction !== undefined ? requireInteraction : true,
+            actions: actions || [
                 { action: 'open', title: 'View Details' },
                 { action: 'close', title: 'Dismiss' }
             ]

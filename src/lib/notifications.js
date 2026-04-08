@@ -20,6 +20,20 @@ const urlBase64ToUint8Array = (base64String) => {
  * Registers the current device for push notifications.
  * Fetches the the VAPID Public Key from the the backend.
  */
+/**
+ * Checks if the current device is already synchronized for push.
+ */
+export const checkDeviceSync = async () => {
+    try {
+        const fingerprint = getDeviceFingerprint();
+        const res = await api.get('/api/notifications/devices');
+        const devices = res.data.data.devices || [];
+        return devices.some(d => d.fingerprint === fingerprint && d.isActive);
+    } catch (err) {
+        return false;
+    }
+};
+
 export const registerCurrentDevice = async (force = false) => {
     try {
         // 1. Check Service Worker support
@@ -45,8 +59,18 @@ export const registerCurrentDevice = async (force = false) => {
         // 5. Subscribe to Push Service
         let subscription = await registration.pushManager.getSubscription();
         
-        // If existing subscription is with a different key, we might need to unsubscribe first
-        // But for now, we just subscribe if not present
+        // CHECK FOR KEY MISMATCH (Important!)
+        if (subscription && subscription.options.applicationServerKey) {
+            const currentKey = btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.options.applicationServerKey)))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            
+            if (currentKey !== publicKey) {
+                console.warn('VAPID Key mismatch! Re-subscribing...');
+                await subscription.unsubscribe();
+                subscription = null;
+            }
+        }
+
         if (!subscription) {
             subscription = await registration.pushManager.subscribe({
                 userVisibleOnly: true,
@@ -57,7 +81,7 @@ export const registerCurrentDevice = async (force = false) => {
         // 6. Gather machine metadata
         const fingerprint = getDeviceFingerprint();
         const info = getDeviceInfo();
-        
+
         // 7. Register REAL TOKEN (Subscription Object) with backend
         const response = await api.post('/api/notifications/devices', {
             token: subscription, // Send the the full JSON object

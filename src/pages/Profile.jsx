@@ -116,8 +116,8 @@ const Profile = () => {
       <div className="page-body">
         {error && <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', borderRadius: '0.625rem' }}>{error}</div>}
         
-        <div className="profile-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 350px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
-          <div className="profile-sidebar" style={{ display: 'grid', gap: '1.5rem' }}>
+        <div className="profile-layout">
+          <div className="profile-sidebar mobile-safe-grid">
             <div className="card" style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
               <div style={{ position: 'relative', display: 'inline-block', marginBottom: '1rem' }}>
                 <div style={{ width: '5rem', height: '5rem', borderRadius: '9999px', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem', fontWeight: 700, color: '#fff', margin: '0 auto' }}>
@@ -130,7 +130,7 @@ const Profile = () => {
                 <Shield size={10} /> {role}
               </span>
               
-              <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-surface-high)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="mobile-safe-grid" style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-surface-high)', gridTemplateColumns: '1fr 1fr' }}>
                 <div style={{ background: 'var(--color-surface-low)', borderRadius: '0.5rem', padding: '0.75rem' }}>
                   <p style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>{stats.hours}</p>
                   <p style={{ margin: 0, fontSize: '0.6875rem', color: 'var(--color-on-surface-variant)' }}>Total Hours</p>
@@ -210,7 +210,7 @@ const Profile = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Profile Information</h3>
               {editing ? (
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <button className="btn-secondary" onClick={() => setEditing(false)}><X size={14} /> Cancel</button>
                   <button className="btn-primary" onClick={handleSave}><Save size={14} /> Save</button>
                 </div>
@@ -219,18 +219,18 @@ const Profile = () => {
               )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
+            <div className="profile-form-grid">
                <div>
                   <label className="input-label">Full Name</label>
-                  {editing ? <input className="input-field" value={form.name} onChange={e => set('name', e.target.value)} /> : <p style={{ padding: '0.5rem 0' }}>{form.name || '—'}</p>}
+                  {editing ? <input className="input-field" value={form.name} onChange={e => set('name', e.target.value)} /> : <p className="text-wrap-anywhere" style={{ padding: '0.5rem 0' }}>{form.name || '—'}</p>}
                </div>
                <div>
                   <label className="input-label">Email Address</label>
-                  <p style={{ padding: '0.5rem 0', color: 'var(--color-outline)' }}>{form.email}</p>
+                  <p className="text-wrap-anywhere" style={{ padding: '0.5rem 0', color: 'var(--color-outline)' }}>{form.email}</p>
                </div>
                <div>
                   <label className="input-label">Phone Number</label>
-                  {editing ? <input className="input-field" value={form.phone} onChange={e => set('phone', e.target.value)} /> : <p style={{ padding: '0.5rem 0' }}>{form.phone || '—'}</p>}
+                  {editing ? <input className="input-field" value={form.phone} onChange={e => set('phone', e.target.value)} /> : <p className="text-wrap-anywhere" style={{ padding: '0.5rem 0' }}>{form.phone || '—'}</p>}
                </div>
                <div>
                   <label className="input-label">Date Joined</label>
@@ -238,13 +238,13 @@ const Profile = () => {
                </div>
                <div style={{ gridColumn: '1 / -1' }}>
                   <label className="input-label">Bio</label>
-                  {editing ? <textarea className="input-field" rows={4} value={form.bio} onChange={e => set('bio', e.target.value)} style={{ resize: 'vertical' }} /> : <p style={{ padding: '0.5rem 0', lineHeight: 1.6 }}>{form.bio || '—'}</p>}
+                  {editing ? <textarea className="input-field" rows={4} value={form.bio} onChange={e => set('bio', e.target.value)} style={{ resize: 'vertical' }} /> : <p className="text-wrap-anywhere" style={{ padding: '0.5rem 0', lineHeight: 1.6 }}>{form.bio || '—'}</p>}
                </div>
             </div>
 
             <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-surface-high)' }}>
                <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 700 }}>Security</h3>
-               <div style={{ display: 'flex', gap: '1rem' }}>
+               <div className="card-action-row">
                   <button className="btn-secondary">Change Password</button>
                   <button className="btn-secondary">Enable 2FA</button>
                </div>

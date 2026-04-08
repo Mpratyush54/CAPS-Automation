@@ -29,14 +29,16 @@ const typeStyle = {
   revision: { bg: '#ffedd5', color: '#ea580c', label: 'Revision' }
 };
 
-const Modal = ({ title, onClose, children, maxWidth = '560px' }) => (
-  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div className="modal-box" style={{ maxWidth }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>{title}</h3>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-on-surface-variant)', display: 'flex', padding: '0.25rem', borderRadius: '0.375rem' }}><X size={18} /></button>
+const Modal = ({ title, onClose, children }) => (
+  <div className="modal-overlay">
+    <div className="modal-box">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--color-surface-high)' }}>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>{title}</h2>
+        <button onClick={onClose} className="btn-secondary" style={{ padding: '0.5rem' }}><X size={24} /></button>
       </div>
-      {children}
+      <div style={{ flex: 1, padding: '0 2rem 2rem' }}>
+        {children}
+      </div>
     </div>
   </div>
 );
@@ -291,6 +293,7 @@ const Notifications = () => {
   const [compose, setCompose] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [permissionState, setPermissionState] = useState(Notification.permission);
 
   const canCompose = ['Team Lead', 'Admin', 'Super Admin'].includes(role);
 
@@ -380,6 +383,27 @@ const Notifications = () => {
             )}
           </div>
         </div>
+
+        {permissionState === 'default' && (
+          <div className="card" style={{ marginBottom: '1.25rem', background: 'var(--color-primary-container)', borderColor: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem' }}>
+            <div style={{ width: '2.5rem', height: '2.5rem', borderRadius: '50%', background: 'var(--color-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Bell size={20} color="white" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-on-primary-container)' }}>Enable Push Notifications</h4>
+              <p style={{ margin: '0.2rem 0 0', fontSize: '0.8125rem', color: 'var(--color-on-primary-container)', opacity: 0.8 }}>Get alerted even when the app is closed.</p>
+            </div>
+            <button className="btn-primary" onClick={async () => {
+              const res = await Notification.requestPermission();
+              setPermissionState(res);
+              if (res === 'granted') {
+                import('../lib/notifications').then(m => m.registerCurrentDevice(true));
+              }
+            }}>
+              Enable
+            </button>
+          </div>
+        )}
 
         {loading && notifications.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '4rem' }}><Loader2 className="spin" /> Loading...</div>

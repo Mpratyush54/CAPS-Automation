@@ -6,14 +6,16 @@ import { ROLES, can } from '../rbac';
 import { api, getErrorMessage, unwrap } from '../lib/api';
 import { SkeletonText, TableSkeleton } from '../components/Skeleton';
 
-const Modal = ({ title, onClose, children, maxWidth = '480px' }) => (
-  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div className="modal-box" style={{ maxWidth }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>{title}</h3>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-on-surface-variant)', display: 'flex', padding: '0.25rem', borderRadius: '0.375rem' }}><X size={18} /></button>
+const Modal = ({ title, onClose, children }) => (
+  <div className="modal-overlay">
+    <div className="modal-box">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--color-surface-high)' }}>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>{title}</h2>
+        <button onClick={onClose} className="btn-secondary" style={{ padding: '0.5rem' }}><X size={24} /></button>
       </div>
-      {children}
+      <div style={{ flex: 1, padding: '0 2rem 2rem' }}>
+        {children}
+      </div>
     </div>
   </div>
 );
@@ -21,7 +23,6 @@ const Modal = ({ title, onClose, children, maxWidth = '480px' }) => (
 const TeamModal = ({ onClose, onSave, initial = null }) => {
   const [form, setForm] = useState({
     name: initial?.name || '',
-    type: initial?.type || 'wing',
     focus: initial?.focus || ''
   });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -43,13 +44,6 @@ const TeamModal = ({ onClose, onSave, initial = null }) => {
             <label className="input-label">Unit Name *</label>
             <input className="input-field" value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="e.g. General Wing or Finance Committee" />
           </div>
-          <div>
-            <label className="input-label">Organization Type *</label>
-            <select className="input-field" value={form.type} onChange={(e) => set('type', e.target.value)} required>
-              <option value="wing">Wing</option>
-              <option value="committee">Committee</option>
-            </select>
-          </div>
           <div><label className="input-label">Focus / Description</label><textarea className="input-field" rows={3} value={form.focus} onChange={(e) => set('focus', e.target.value)} style={{ resize: 'vertical' }} placeholder="Mission or area of responsibility..." /></div>
         </div>
         <div className="card-action-row" style={{ marginTop: '1.5rem' }}>
@@ -61,47 +55,6 @@ const TeamModal = ({ onClose, onSave, initial = null }) => {
   );
 };
 
-const WingModal = ({ onClose, onSave }) => {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  return (
-    <Modal title="Create New Wing" onClose={onClose}>
-      <div style={{ display: 'grid', gap: '0.875rem' }}>
-        <div><label className="input-label">Wing Name *</label><input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required /></div>
-        <div><label className="input-label">Description</label><textarea className="input-field" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-        <div className="card-action-row" style={{ marginTop: '1.25rem' }}>
-          <button className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
-          <button className="btn-primary" onClick={() => onSave({ name, description })} style={{ flex: 1, justifyContent: 'center' }}><Save size={14} /> Create Wing</button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
-
-const CommitteeModal = ({ onClose, onSave, wings }) => {
-  const [name, setName] = useState('');
-  const [wingId, setWingId] = useState('');
-  const [description, setDescription] = useState('');
-  return (
-    <Modal title="Create New Committee" onClose={onClose}>
-      <div style={{ display: 'grid', gap: '0.875rem' }}>
-        <div><label className="input-label">Committee Name *</label><input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required /></div>
-        <div>
-          <label className="input-label">Parent Wing *</label>
-          <select className="input-field" value={wingId} onChange={(e) => setWingId(e.target.value)} required>
-            <option value="">Select Wing</option>
-            {wings.map(w => <option key={w._id || w.id} value={w._id || w.id}>{w.name}</option>)}
-          </select>
-        </div>
-        <div><label className="input-label">Description</label><textarea className="input-field" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-        <div className="card-action-row" style={{ marginTop: '1.25rem' }}>
-          <button className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
-          <button className="btn-primary" onClick={() => onSave({ name, wingId, description })} style={{ flex: 1, justifyContent: 'center' }}><Save size={14} /> Create Committee</button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
 
 const MemberModal = ({ onClose, onSave, allUsers, existingMemberIds }) => {
   const [search, setSearch] = useState('');
@@ -114,7 +67,7 @@ const MemberModal = ({ onClose, onSave, allUsers, existingMemberIds }) => {
   ).slice(0, 8);
 
   return (
-    <Modal title="Add Member to Roster" onClose={onClose} maxWidth="400px">
+    <Modal title="Add Member to Roster" onClose={onClose}>
       {!pendingUser ? (
         <div className="stack-gap-1">
           <div className="search-bar" style={{ background: 'var(--color-surface-low)' }}>
@@ -246,7 +199,7 @@ const Organization = () => {
       const response = await api.get('/api/organization/teams', { params: { search: debouncedSearch || undefined } });
       const payload = unwrap(response);
       const rows = payload?.rows || [];
-      const nextTeams = rows.map(t => ({ ...t, id: t._id || t.id, name: t.name || 'Unnamed Team', type: t.type || 'wing' }));
+      const nextTeams = rows.map(t => ({ ...t, id: t._id || t.id, name: t.name || 'Unnamed Unit' }));
       if (isMounted) {
         setTeams(nextTeams);
         if (!selectedId && nextTeams.length) {
@@ -368,7 +321,7 @@ const Organization = () => {
               <input placeholder="Search directory..." value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
 
-            <div className="stack-gap-1"> {/* WINGS */}
+            <div className="stack-gap-1"> 
               {loading && teams.length === 0 ? (
                 <>
                   {[...Array(6)].map((_, i) => (
@@ -377,7 +330,7 @@ const Organization = () => {
                 </>
               ) : (
                 <>
-                  {teams.filter(t => t.type === 'wing').filter(t => (t?.name || '').toLowerCase().includes(
+                  {teams.filter(t => (t?.name || '').toLowerCase().includes(
                     (search || '').toLowerCase())).map(team => {
                       const isActive = selectedId === team.id;
                       return (
@@ -385,14 +338,10 @@ const Organization = () => {
                           className={`btn-ghost ${isActive ? 'active' : ''}`}
                           style={{
                             width: '100%', justifyContent: 'flex-start',
-                            padding: '0.5rem', fontWeight: 700, fontSize: '0.8125rem', background: isActive ? 'rgba(67, 67, 213, 0.1)' : 'transparent', borderRadius: '0.5rem'
+                            padding: '0.5rem', fontWeight: 600, fontSize: '0.8125rem', background: isActive ? 'rgba(67, 67, 213, 0.1)' : 'transparent', borderRadius: '0.5rem'
                           }} >
-                          <Building2 size={13} style={{ marginRight: '0.5rem' }} /> {team.name} </button>);
+                          <Users size={13} style={{ marginRight: '0.5rem' }} /> {team.name} </button>);
                     })}
-                  {/* COMMITTEES */}
-                  {teams.filter(t => t.type === 'committee').filter(t => (t?.name || '').toLowerCase().includes((search || '').toLowerCase())).map(team => {
-                    const isActive = selectedId === team.id; return (<button key={team.id} onClick={() => setSelectedId(team.id)} className={`btn-ghost ${isActive ? 'active' : ''}`} style={{ padding: '0.375rem 0.75rem', fontSize: '0.75rem', justifyContent: 'flex-start', marginLeft: '1rem' }} > <Shield size={11} style={{ marginRight: '0.4rem' }} /> {team.name} </button>);
-                  })}
                 </>
               )}
             </div>
@@ -410,7 +359,6 @@ const Organization = () => {
                   <div className="card-flex-between" style={{ alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
                     <div>
                       <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#fff' }}>{displayName}</h2>
-                      <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.9 }}>Type: {activeFocus.type === 'wing' ? 'Wing' : 'Committee'}</p>
 
                       <p style={{ margin: '0.75rem 0 0', fontSize: '0.8125rem', opacity: 0.84, fontStyle: activeFocus.focus ? 'normal' : 'italic' }}>{activeFocus.focus || activeFocus.description || 'No focus description available.'}</p>
                     </div>
@@ -481,16 +429,19 @@ const Organization = () => {
         )}
 
         {deleteModal && (
-          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeleteModal(null)}>
-            <div className="modal-box" style={{ maxWidth: '400px' }}>
-              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem' }}>Confirm Delete</h3>
-              <p style={{ fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', marginBottom: '1.5rem' }}>
-                Are you sure you want to delete <strong style={{ color: 'var(--color-on-surface)' }}>{deleteModal.name}</strong>? This action cannot be undone.
-              </p>
-              <div className="card-action-row">
-                <button className="btn-secondary" onClick={() => setDeleteModal(null)} style={{ flex: 1 }}>Cancel</button>
-                <button className="btn-primary" onClick={deleteTeam} style={{ flex: 1, justifyContent: 'center', background: 'var(--color-error)' }}>Delete</button>
-              </div>
+          <div className="modal-overlay">
+            <div className="modal-box" style={{ justifyContent: 'center', alignItems: 'center', padding: '2rem' }}>
+               <div style={{ maxWidth: '400px', textAlign: 'center' }}>
+                  <AlertCircle size={48} style={{ color: 'var(--color-error)', marginBottom: '1rem' }} />
+                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>Confirm Delete</h2>
+                  <p style={{ fontSize: '1rem', color: 'var(--color-on-surface-variant)', marginBottom: '2rem' }}>
+                    Are you sure you want to delete <strong style={{ color: 'var(--color-on-surface)' }}>{deleteModal.name}</strong>? This action cannot be undone.
+                  </p>
+                  <div className="card-action-row" style={{ justifyContent: 'center' }}>
+                    <button className="btn-secondary" onClick={() => setDeleteModal(null)} style={{ flex: 1, padding: '0.75rem' }}>Cancel</button>
+                    <button className="btn-primary" onClick={deleteTeam} style={{ flex: 1, padding: '0.75rem', justifyContent: 'center', background: 'var(--color-error)' }}>Delete</button>
+                  </div>
+               </div>
             </div>
           </div>
         )}

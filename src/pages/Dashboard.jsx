@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import {
-  Clock, CheckCircle2, TrendingUp, Calendar, PlusCircle,
+  Clock, CheckCircle2, TrendingUp, Calendar, 
+  PlusCircle, FileText,
   ArrowUpRight, Users, Building2, Bell, ClipboardList, Shield,
 } from 'lucide-react';
 import TopBar from '../components/TopBar';
@@ -51,6 +52,7 @@ const fallbackDashboard = {
     kpis: [
       { key: 'myHoursWeek', label: 'My Hours (Week)', value: '14h', icon: Clock, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
       { key: 'myTaskCount', label: 'My Tasks', value: '3', icon: ClipboardList, color: '#059669', bg: '#d1fae5' },
+      { key: 'myMomsCount', label: 'MOMs Submitted', value: '1', icon: FileText, color: '#7c3aed', bg: '#ede9fe' },
       { key: 'assignedEventsCount', label: 'Events Assigned', value: '2', icon: Calendar, color: '#d97706', bg: '#fef3c7' },
     ],
     myTasks: [
@@ -73,8 +75,8 @@ const fallbackDashboard = {
     kpis: [
       { label: 'Team Members', value: '12', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
       { label: 'Team Hours (Week)', value: '86h', icon: Clock, color: '#059669', bg: '#d1fae5' },
-      { label: 'Pending Tasks', value: '7', icon: ClipboardList, color: '#d97706', bg: '#fef3c7' },
-      { label: 'Logs Submitted', value: '34', icon: CheckCircle2, color: '#059669', bg: '#d1fae5' },
+      { key: 'pendingTasksCount', label: 'Pending Tasks', value: '7', icon: ClipboardList, color: '#d97706', bg: '#fef3c7' },
+      { key: 'teamMomsCount', label: 'Team MOMs', value: '4', icon: FileText, color: '#7c3aed', bg: '#ede9fe' },
     ],
     teamLogsToday: [
       { member: 'Priya Nair', task: 'Sprint Review', time: '2h 30m', status: 'Completed' },
@@ -97,8 +99,8 @@ const fallbackDashboard = {
     kpis: [
       { label: 'Wing Members', value: '42', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)' },
       { label: 'Committees', value: '5', icon: Building2, color: '#059669', bg: '#d1fae5' },
-      { label: 'Wing Hours (Week)', value: '312h', icon: Clock, color: '#d97706', bg: '#fef3c7' },
-      { label: 'Active Events', value: '3', icon: Calendar, color: '#7c3aed', bg: '#ede9fe' },
+      { key: 'wingHoursWeek', label: 'Wing Hours (Week)', value: '312h', icon: Clock, color: '#d97706', bg: '#fef3c7' },
+      { key: 'orgMomsCount', label: 'Total MOMs', value: '12', icon: FileText, color: '#7c3aed', bg: '#ede9fe' },
     ],
     committeePerformanceRows: [
       { wing: 'Tech Wing', members: 24, hours: 186, logs: 48, completion: '88%' },
@@ -111,8 +113,8 @@ const fallbackDashboard = {
     kpis: [
       { label: 'Total Members', value: '114', icon: Users, color: '#4343d5', bg: 'var(--color-primary-fixed)', delta: '-' },
       { label: 'Total Hours (Week)', value: '--', icon: Clock, color: '#059669', bg: '#d1fae5', delta: '-' },
-      { label: 'Active Wings', value: '-', icon: Building2, color: '#d97706', bg: '#fef3c7', delta: '-' },
-      { label: 'Global Events', value: '-', icon: Calendar, color: '#7c3aed', bg: '#ede9fe', delta: '-' },
+      { key: 'activeWings', label: 'Active Wings', value: '-', icon: Building2, color: '#d97706', bg: '#fef3c7', delta: '-' },
+      { key: 'orgMomsCount', label: 'Total MOMs', value: '-', icon: FileText, color: '#7c3aed', bg: '#ede9fe', delta: '-' },
     ],
     organizationWideHoursWeekChart: [
       { day: 'Mon', hours: 42 },
@@ -409,7 +411,7 @@ const normalizeDashboard = (role, payload) => {
         { ...base.kpis[0], value: values.teamMembersCount?.value ?? base.kpis[0].value },
         { ...base.kpis[1], value: values.teamHoursWeek?.value ? `${values.teamHoursWeek.value}h` : base.kpis[1].value },
         { ...base.kpis[2], value: values.pendingTasksCount?.value ?? base.kpis[2].value },
-        { ...base.kpis[3], value: values.logsSubmittedCount?.value ?? base.kpis[3].value },
+        { ...base.kpis[3], value: values.teamMomsCount?.value ?? base.kpis[3].value },
       ],
       teamLogsToday: (sections.teamLogsToday || base.teamLogsToday).map(log => ({
         ...log,
@@ -442,7 +444,7 @@ const normalizeDashboard = (role, payload) => {
       { ...base.kpis[0], value: values.totalMembers?.value ?? base.kpis[0].value },
       { ...base.kpis[1], value: values.totalHoursWeek?.value ? `${values.totalHoursWeek.value}h` : base.kpis[1].value },
       { ...base.kpis[2], value: values.activeWings?.value ?? base.kpis[2].value },
-      { ...base.kpis[3], value: values.globalEvents?.value ?? base.kpis[3].value },
+      { ...base.kpis[3], value: values.orgMomsCount?.value ?? base.kpis[3].value },
     ],
     organizationWideHoursWeekChart: (sections.organizationWideHoursWeekChart || base.organizationWideHoursWeekChart).map((row) => ({ day: row.day, hours: row.hours ?? row.hrs ?? 0 })),
     wingOverviewRows: sections.wingOverviewRows || base.wingOverviewRows,

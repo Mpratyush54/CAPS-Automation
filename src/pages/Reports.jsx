@@ -3,11 +3,44 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid, PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { Download, TrendingUp, TrendingDown, Clock, CheckCircle2, Info, ChevronDown, AlertCircle } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, Clock, CheckCircle2, Info, ChevronDown, AlertCircle, BarChart3, PieChart as PieIcon } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES } from '../rbac';
 import { api, getErrorMessage, unwrap } from '../lib/api';
+import { Skeleton, SkeletonText, SkeletonTitle, SkeletonButton, TableSkeleton } from '../components/Skeleton';
+
+const ReportsSkeleton = () => (
+  <div className="page-body">
+    <div className="page-controls" style={{ marginBottom: '1.5rem' }}>
+      <SkeletonButton style={{ width: '120px', height: '32px' }} />
+      <SkeletonButton style={{ width: '180px', height: '36px' }} />
+      <SkeletonButton style={{ width: '180px', height: '36px' }} />
+      <div style={{ marginLeft: 'auto' }}><SkeletonButton style={{ width: '110px', height: '36px' }} /></div>
+    </div>
+    
+    <div className="grid-cols-4" style={{ marginBottom: '1.25rem' }}>
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="card"><SkeletonTitle width="40%" /><Skeleton style={{ height: '2.5rem', margin: '0.75rem 0 0.5rem' }} /><SkeletonText width="60%" /></div>
+      ))}
+    </div>
+
+    <div className="mobile-safe-grid" style={{ gridTemplateColumns: '1.5fr 1fr', marginBottom: '1rem' }}>
+       <div className="card chart-card"><SkeletonTitle width="30%" style={{ marginBottom: '1rem' }} /><Skeleton style={{ height: '240px' }} /></div>
+       <div className="card chart-card"><SkeletonTitle width="35%" style={{ marginBottom: '1rem' }} /><Skeleton style={{ height: '240px' }} /></div>
+    </div>
+
+    <div className="card chart-card" style={{ marginBottom: '1rem' }}><SkeletonTitle width="20%" style={{ marginBottom: '1rem' }} /><Skeleton style={{ height: '220px' }} /></div>
+
+    <div className="card table-card">
+      <div style={{ padding: '1rem 1.25rem' }}><SkeletonTitle width="15%" /></div>
+      <table className="data-table">
+        <thead><tr><th><SkeletonText width="40%" /></th><th><SkeletonText width="30%" /></th><th><SkeletonText width="30%" /></th><th><SkeletonText width="50%" /></th></tr></thead>
+        <tbody><TableSkeleton rows={5} cols={4} /></tbody>
+      </table>
+    </div>
+  </div>
+);
 
 const MONTHS = ['Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 const COLORS = ['#4343d5', '#674db0', '#b095ff', '#dde1ff', '#6a7091', '#525877'];
@@ -66,11 +99,9 @@ const KpiCards = ({ kpi, label }) => (
 
 const Reports = () => {
   const { role, user } = useAuthStore();
-  const [wings, setWings] = useState([]);
-  const [committees, setCommittees] = useState([]);
-  const [selectedWing, setSelectedWing] = useState(user?.primaryWingId || '');
-  const [selectedCommittee, setSelectedCommittee] = useState(user?.primaryCommitteeId || '');
-  const [viewMode, setViewMode] = useState(role === ROLES.SUPER_ADMIN ? 'Global' : 'Label 1');
+  const [teams, setTeams] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(user?.teamId || user?.committee || '');
+  const [viewMode, setViewMode] = useState((role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) ? 'Global' : 'Unit');
   
   const [statsData, setStatsData] = useState({
     kpi: { hours: '0', logs: '0', events: '0', efficiency: '0%' },
@@ -86,14 +117,13 @@ const Reports = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        const [wRes, cRes] = await Promise.all([
-          api.get('/api/organization/wings'),
-          api.get('/api/organization/committees')
-        ]);
-        const wData = unwrap(wRes);
-        const cData = unwrap(cRes);
-        setWings(wData.rows || []);
-        setCommittees(cData.rows || []);
+        const response = await api.get('/api/organization/teams');
+        const payload = unwrap(response);
+        const rows = payload.rows || [];
+        
+        // Normalize teams
+        const allTeams = rows.map(t => ({ ...t, id: t._id || t.id, name: t.name || 'Unnamed Unit' }));
+        setTeams(allTeams);
       } catch (e) {
         console.error('Failed to load organization scope', e);
       }
@@ -106,11 +136,11 @@ const Reports = () => {
     const loadStats = async () => {
       setLoading(true);
       try {
-        const view = viewMode === 'Global' ? 'global' : (selectedCommittee ? 'team' : 'wing');
+        const view = viewMode === 'Global' ? 'global' : 'team';
         const [overviewRes, breakdownRes, contribRes] = await Promise.all([
-          api.get('/api/stats/overview', { params: { view, labelOneId: selectedWing, labelTwoId: selectedCommittee } }),
-          api.get('/api/stats/breakdown', { params: { view: view === 'global' ? 'global-label-one' : 'admin-related-labels', labelOneId: selectedWing } }),
-          api.get('/api/stats/contributions', { params: { labelOneId: selectedWing, labelTwoId: selectedCommittee } })
+          api.get('/api/stats/overview', { params: { view, teamId: selectedTeam } }),
+          api.get('/api/stats/breakdown', { params: { view: view === 'global' ? 'global' : 'team', teamId: selectedTeam } }),
+          api.get('/api/stats/contributions', { params: { teamId: selectedTeam } })
         ]);
         if (!mounted) return;
         setStatsData(unwrap(overviewRes));
@@ -125,16 +155,16 @@ const Reports = () => {
     };
     loadStats();
     return () => { mounted = false; };
-  }, [viewMode, selectedWing, selectedCommittee]);
+  }, [viewMode, selectedTeam]);
 
   const pageTitle = role === ROLES.TEAM_LEAD ? 'Team Stats' : role === ROLES.ADMIN ? 'Wing Analytics' : 'Organization Dashboard';
   const monthlyChartData = MONTHS.map((m, i) => ({ month: m, v: statsData.monthly?.[i] || 0 }));
 
-  if (loading && statsData.weekly.length === 0) {
+  if (loading && (statsData.weekly.length === 0 || statsData.monthly.length === 0)) {
     return (
       <>
         <TopBar title={pageTitle} />
-        <div className="page-body"><div className="card">Loading analytics...</div></div>
+        <ReportsSkeleton />
       </>
     );
   }
@@ -150,20 +180,16 @@ const Reports = () => {
         )}
 
         <div className="page-controls">
-          {role === ROLES.SUPER_ADMIN && (
+          {(role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) && (
             <div className="card-action-row">
-              {['Global', 'Label 1'].map((m) => (
+              {['Global', 'Unit'].map((m) => (
                 <button key={m} className={`chip${viewMode === m ? ' active' : ''}`} onClick={() => setViewMode(m)}>{m} View</button>
               ))}
             </div>
           )}
 
-          {(viewMode === 'Label 1' || role !== ROLES.SUPER_ADMIN) && (
-            <Select value={selectedWing} onChange={setSelectedWing} options={[{ id: '', name: 'Select Wing' }, ...wings]} />
-          )}
-
-          {selectedWing && (
-            <Select value={selectedCommittee} onChange={setSelectedCommittee} options={[{ id: '', name: 'All Committees' }, ...committees.filter(c => String(c.wingId) === String(selectedWing))]} />
+          {viewMode === 'Unit' && (role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) && (
+            <Select value={selectedTeam} onChange={setSelectedTeam} options={[{ id: '', name: 'Select Unit' }, ...teams]} />
           )}
 
           <div className="card-action-row" style={{ marginLeft: 'auto', alignItems: 'center' }}>
@@ -252,14 +278,13 @@ const Reports = () => {
           </div>
           <table className="data-table">
             <thead>
-              <tr><th>Volunteer</th><th>Wing</th><th>Committee</th><th>Hours</th><th>Logs</th></tr>
+              <tr><th>Volunteer</th><th>Unit</th><th>Hours</th><th>Logs</th></tr>
             </thead>
             <tbody>
               {contributions.map((row) => (
                 <tr key={row.id}>
                   <td style={{ fontWeight: 600 }}>{row.volunteer}</td>
-                  <td>{row.labelOne}</td>
-                  <td>{row.labelTwo}</td>
+                  <td>{row.labelOne || row.team}</td>
                   <td>{row.hours}h</td>
                   <td>{row.logs}</td>
                 </tr>

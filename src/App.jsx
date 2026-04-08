@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   LayoutDashboard, ClipboardList, Calendar,
   BarChart3, Building2, Bell, FileText,
@@ -7,24 +7,24 @@ import {
 import Sidebar from './components/Sidebar';
 import { useAuthStore } from './store/auth';
 import { hasMinRole, getNavItems, ROLES } from './rbac';
-import { initSocket, disconnectSocket } from './lib/socket';
-import { getDeviceFingerprint } from './lib/device';
+import { initSocket, disconnectSocket, socket } from './lib/socket';
+import { getDeviceFingerprint, getNotificationState, getDeviceInfo } from './lib/device';
 import { api } from './lib/api';
+import { registerCurrentDevice, checkDeviceSync } from './lib/notifications';
 
 // Lazy-loaded pages
-const Login        = lazy(() => import('./pages/Login'));
-const Dashboard    = lazy(() => import('./pages/Dashboard'));
-const Logs         = lazy(() => import('./pages/Logs'));
-const Events       = lazy(() => import('./pages/Events'));
-const Reports      = lazy(() => import('./pages/Reports'));
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Logs = lazy(() => import('./pages/Logs'));
+const Events = lazy(() => import('./pages/Events'));
+const Reports = lazy(() => import('./pages/Reports'));
 const ReportCenter = lazy(() => import('./pages/ReportCenter'));
 const Organization = lazy(() => import('./pages/Organization'));
-const Notifications= lazy(() => import('./pages/Notifications'));
-const Profile      = lazy(() => import('./pages/Profile'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Moms = lazy(() => import('./pages/Moms'));
 
 const NAV_ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell, FileText };
-
-import { registerCurrentDevice } from './lib/notifications';
 
 /* ── Guards ──────────────────────────────────────────────────── */
 const ProtectedRoute = ({ children }) => {
@@ -90,11 +90,91 @@ const ScrollToTop = () => {
   return null;
 };
 
+/* ── PWA & Notifications Onboarding ───────────────────────── */
+const OnboardingBanner = () => {
+  const [showInstall, setShowInstall] = useState(false);
+  const [showNotify, setShowNotify] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const info = getDeviceInfo();
+
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      // 1. PWA Install Logic
+      const handleBeforeInstall = (e) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+        setShowInstall(true);
+      };
+      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+      // 2. Notification Verification Logic
+      const isSynced = await checkDeviceSync();
+      const state = getNotificationState();
+      
+      if (state !== 'granted' || !isSynced) {
+        setShowNotify(true);
+      }
+
+      return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
+    checkOnboarding();
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setShowInstall(false);
+    }
+  };
+
+  const handleNotifyClick = async () => {
+    try {
+      await registerCurrentDevice(true);
+      setShowNotify(false);
+    } catch (e) {
+      console.error('Registration failed:', e);
+    }
+  };
+
+  if (!showInstall && !showNotify) return null;
+
+  return (
+    <div className="onboarding-container">
+      {showInstall && (
+        <div className="banner install-banner pulse-border">
+          <div className="banner-content">
+            <span className="icon">📲</span>
+            <div>
+              <strong>Install {info.os} App</strong>
+              <p>Get a faster experience & background updates.</p>
+            </div>
+          </div>
+          <button className="btn-primary-glow sm" onClick={handleInstallClick}>Install</button>
+        </div>
+      )}
+      {showNotify && (
+        <div className="banner notify-banner">
+          <div className="banner-content">
+            <span className="icon">🔔</span>
+            <div>
+              <strong>Stay Updated</strong>
+              <p>Enable real-time worklog & event alerts.</p>
+            </div>
+          </div>
+          <button className="btn-accent sm" onClick={handleNotifyClick}>Enable</button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ── App Layout ──────────────────────────────────────────────── */
 const AppLayout = ({ children }) => (
   <div className="app-layout">
     <Sidebar />
     <div className="main-content">
+      <OnboardingBanner />
       <Suspense fallback={<PremiumLoader />}>
         {children}
       </Suspense>
@@ -108,18 +188,37 @@ function App() {
   const { user, token } = useAuthStore();
 
   useEffect(() => {
-    if (token && user?._id) {
-      initSocket(user._id);
+    if (token && user?.id) {
+      initSocket(user.id);
 
-      // Explicitly handle device enrollment on session start
-      registerCurrentDevice(false).catch(err => {
-        console.warn('Initial device registration failed (may require explicit user permission):', err.message);
+      // Listen for REAL-TIME NOTIFICATIONS globally
+      const handleGlobalNotification = (data) => {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(data.title || 'New Notification', {
+            body: data.body || 'New update available.',
+            icon: '/favicon.svg',
+            tag: data.id || 'new-notif'
+          });
+        }
+      };
+
+      socket.on('notification:new', handleGlobalNotification);
+
+      // Background registration only if not already synced (Silent sync)
+      checkDeviceSync().then(isSynced => {
+        if (!isSynced && getNotificationState() === 'granted') {
+          registerCurrentDevice(false).catch(() => {});
+        }
       });
+
+      return () => {
+        socket.off('notification:new', handleGlobalNotification);
+        disconnectSocket();
+      };
     } else {
       disconnectSocket();
     }
-    return () => disconnectSocket();
-  }, [token, user?._id]);
+  }, [token, user?.id]);
 
   return (
     <BrowserRouter>
@@ -139,12 +238,13 @@ function App() {
           <ProtectedRoute>
             <AppLayout>
               <Routes>
-                <Route index              element={<Dashboard />} />
-                <Route path="dashboard"   element={<Dashboard />} />
-                <Route path="logs"        element={<Logs />} />
-                <Route path="events"      element={<Events />} />
+                <Route index element={<Dashboard />} />
+                <Route path="dashboard" element={<Dashboard />} />
+                <Route path="logs" element={<Logs />} />
+                <Route path="events" element={<Events />} />
                 <Route path="notifications" element={<Notifications />} />
-                <Route path="profile"     element={<Profile />} />
+                <Route path="profile" element={<Profile />} />
+                <Route path="moms" element={<Moms />} />
 
                 {/* Team Lead+ */}
                 <Route path="reports" element={

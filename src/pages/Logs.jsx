@@ -26,14 +26,16 @@ const StatusBadge = ({ status }) => {
 
 /* -------------------- MODALS -------------------- */
 
-const Modal = ({ title, onClose, children, maxWidth = '520px' }) => (
-  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-    <div className="modal-box" style={{ maxWidth }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>{title}</h3>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-on-surface-variant)', display: 'flex', padding: '0.25rem', borderRadius: '0.375rem' }}><X size={18} /></button>
+const Modal = ({ title, onClose, children }) => (
+  <div className="modal-overlay">
+    <div className="modal-box">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--color-surface-high)' }}>
+        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>{title}</h2>
+        <button onClick={onClose} className="btn-secondary" style={{ padding: '0.5rem' }}><X size={24} /></button>
       </div>
-      {children}
+      <div style={{ flex: 1, padding: '0 2rem 2rem' }}>
+        {children}
+      </div>
     </div>
   </div>
 );

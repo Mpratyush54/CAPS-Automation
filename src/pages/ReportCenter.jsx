@@ -19,7 +19,7 @@ const ReportCenter = () => {
 
   const canSubmitWeekly = can(role, 'viewTeamReports');
   const canViewAllTeams = role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN;
-  
+
   const teams = useMemo(() => ['All Teams', ...new Set(reportRows.map((row) => row.team))], [reportRows]);
 
   useEffect(() => {
@@ -101,11 +101,11 @@ const ReportCenter = () => {
             {REPORT_PERIODS.map((period) => <button key={period} className={`chip${selectedPeriod === period ? ' active' : ''}`} onClick={() => setSelectedPeriod(period)}>{period}</button>)}
           </div>
           <div className="card-action-row" style={{ marginLeft: 'auto', flexWrap: 'wrap' }}>
-             {canViewAllTeams && (
+            {canViewAllTeams && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.65rem', background: 'var(--color-surface-low)', borderRadius: '0.5rem' }}>
                 <Filter size={13} style={{ color: 'var(--color-outline)' }} />
                 <select value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} style={{ background: 'transparent', border: 'none', outline: 'none', fontSize: '0.8125rem' }}>
-                   {teams.map((team) => <option key={team} value={team}>{team}</option>)}
+                  {teams.map((team) => <option key={team} value={team}>{team}</option>)}
                 </select>
               </div>
             )}
