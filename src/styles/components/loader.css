@@ -1,0 +1,17 @@
+.premium-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 50vh;
+  gap: 2rem;
+}
+
+.premium-loader-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  animation: fadeIn 1s ease-in-out infinite alternate;
+}

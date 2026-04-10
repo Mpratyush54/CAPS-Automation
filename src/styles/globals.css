@@ -345,6 +345,33 @@ h6 {
   transition: background 0.25s, box-shadow 0.25s;
 }
 
+.stack-gap-1 {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stack-gap-05 {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card-flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.card-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .card-title {
   font-size: 0.875rem;
   font-weight: 600;
@@ -443,6 +470,31 @@ h6 {
 
 .btn-danger:hover {
   background: var(--color-error-container);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--color-surface-high);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-icon:hover {
+  background: var(--color-surface-highest);
+  color: var(--color-on-surface);
+}
+
+.btn-icon.sm {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.45rem;
 }
 
 /* ── Inputs ─────────────────────────────────────────────────── */
@@ -594,32 +646,25 @@ h6 {
 /* ── Modal ──────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 240px;
-  /* Respect sidebar on desktop */
-  background: var(--color-background);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
-  flex-direction: column;
-  z-index: 100;
-  animation: fadeIn 0.2s ease;
-}
-
-.modal-overlay.full {
-  left: 0 !important;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.3s ease;
+  padding: 1.5rem;
 }
 
 .modal-box {
-  background: var(--color-background);
+  background: var(--color-surface-lowest);
+  border-radius: 1.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   width: 100%;
-  height: 100%;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  overflow-y: auto;
-  border: none;
-  box-shadow: none;
-  border-radius: 0;
+  max-height: 90vh;
+  overflow: hidden;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -876,13 +921,26 @@ h6 {
     padding: 0;
   }
 
+  /* Full modals (like workspace) shouldn't slide up like sheets */
+  .modal-overlay.full {
+    align-items: stretch;
+  }
+
   .modal-box {
     border-radius: 1.25rem 1.25rem 0 0;
     max-width: 100%;
-    padding: 1.5rem 1.25rem;
-    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    padding: 0; /* Remove padding here, handled by header/body */
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom);
     max-height: 92vh;
     animation: modal-up 0.22s cubic-bezier(.4, 0, .2, 1);
+  }
+
+  .modal-overlay.full .modal-box {
+    border-radius: 0;
+    max-height: 100vh;
+    animation: fadeIn 0.3s ease;
   }
 
   @keyframes modal-up {
@@ -890,7 +948,6 @@ h6 {
       opacity: 0;
       transform: translateY(40px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
@@ -903,8 +960,36 @@ h6 {
     padding: 0;
   }
 
-  .chip-group {
-    flex-wrap: wrap !important;
+  /* Improved chips and tabs for mobile */
+  .chip-group, 
+  .tab-group,
+  .scroll-x {
+    display: flex !important;
+    gap: 0.5rem;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .chip-group::-webkit-scrollbar,
+  .tab-group::-webkit-scrollbar,
+  .scroll-x::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  /* Force stack utility */
+  .stack-mobile {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1rem !important;
+    overflow-y: auto !important;
+  }
+
+  .stack-mobile > * {
+    width: 100% !important;
+    grid-column: span 1 / span 1 !important;
   }
 }
 
@@ -1248,6 +1333,10 @@ h6 {
   min-width: 5rem;
 }
 
+.mobile-log-list {
+  display: none;
+}
+
 @media (max-width: 768px) {
 
   /* Show card list, hide table */
@@ -1306,6 +1395,22 @@ h6 {
   min-width: 680px;
 }
 
+.dashboard-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dashboard-table-card .data-table {
+  min-width: 640px;
+}
+
+[data-theme="dark"] .table-card .btn-secondary,
+[data-theme="dark"] .table-card .btn-icon {
+  background: var(--color-surface-container);
+  color: var(--color-on-surface);
+}
+
 .chart-card {
   overflow: hidden;
 }
@@ -1319,6 +1424,29 @@ h6 {
 @media (max-width: 768px) {
   .mobile-safe-grid {
     grid-template-columns: 1fr !important;
+  }
+
+  .org-content-column {
+    gap: 1rem !important;
+  }
+
+  .org-hero-card {
+    padding: 1.25rem !important;
+    border-radius: 16px !important;
+  }
+
+  .org-hero-copy {
+    max-width: 100% !important;
+  }
+
+  .org-hero-actions {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+
+  .org-roster-header {
+    padding: 1rem !important;
+    gap: 0.75rem;
   }
 
   .card-flex-between {
@@ -1337,6 +1465,14 @@ h6 {
 
   .table-card .data-table {
     min-width: 560px;
+  }
+
+  .dashboard-table-card .data-table {
+    min-width: 520px;
+  }
+
+  .dashboard-flow {
+    gap: 0.75rem;
   }
 }
 

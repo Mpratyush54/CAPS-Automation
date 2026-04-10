@@ -1,20 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
-import { Eye, EyeOff, Zap, AlertCircle, Loader2, UserPlus } from 'lucide-react';
-import { api, getErrorMessage, unwrap } from '../lib/api';
-import { normalizeUser } from '../lib/adapters';
+import { Eye, EyeOff, Zap, Loader2, UserPlus, Mail, Lock, User, Briefcase, Award } from 'lucide-react';
+import { getErrorMessage } from '../lib/api';
+import { authService } from '../services/authService';
 
-const readAuthPayload = (payload) => {
-  const data = payload?.data ? payload.data : payload;
-  const user = normalizeUser(data?.user || payload?.user);
-  return {
-    token: data?.accessToken || data?.token || payload?.accessToken || payload?.token,
-    refreshToken: data?.refreshToken || payload?.refreshToken || null,
-    user,
-    role: user?.role || data?.role || payload?.role || null,
-  };
-};
+// UI Components
+import Alert from '../components/ui/Alert';
+import TextField from '../components/ui/TextField';
+import Select from '../components/ui/Select';
 
 const Login = ({ initialMode = 'login' }) => {
   const [mode, setMode] = useState(initialMode === 'signup' ? 'signup' : 'login');
@@ -37,22 +31,14 @@ const Login = ({ initialMode = 'login' }) => {
 
   const setSignup = (key, value) => setSignupForm((current) => ({ ...current, [key]: value }));
 
-  const loginWithBackend = async () => {
-    const response = await api.post('/api/auth/login', { email, password });
-    const auth = readAuthPayload(unwrap(response));
-    if (!auth.token || !auth.user || !auth.role) {
-      throw new Error('Login response is missing auth data.');
-    }
-    login(auth);
-  };
-
   const handleLogin = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setError(null);
     setSuccess(null);
     setLoading(true);
     try {
-      await loginWithBackend();
+      const auth = await authService.login(email, password);
+      login(auth);
       navigate('/dashboard');
     } catch (backendError) {
       setError(getErrorMessage(backendError, 'Invalid email or password.'));
@@ -62,12 +48,12 @@ const Login = ({ initialMode = 'login' }) => {
   };
 
   const handleSignup = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setError(null);
     setSuccess(null);
     setLoading(true);
     try {
-      await api.post('/api/auth/signup', {
+      await authService.signup({
         name: signupForm.name,
         email,
         password,
@@ -87,122 +73,149 @@ const Login = ({ initialMode = 'login' }) => {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-background)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+      {/* Background Decor */}
       <div style={{ position: 'fixed', top: '-10%', right: '-10%', width: '60vh', height: '60vh', background: 'radial-gradient(circle, rgba(67,67,213,0.08) 0%, transparent 70%)', borderRadius: '9999px', pointerEvents: 'none' }} />
       <div style={{ position: 'fixed', bottom: '-10%', left: '-10%', width: '50vh', height: '50vh', background: 'radial-gradient(circle, rgba(176,149,255,0.1) 0%, transparent 70%)', borderRadius: '9999px', pointerEvents: 'none' }} />
 
       <div style={{ width: '100%', maxWidth: '440px', position: 'relative', zIndex: 1 }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ width: '3rem', height: '3rem', borderRadius: '0.875rem', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem', boxShadow: '0 8px 24px rgba(67,67,213,0.3)' }}>
-            {isSignup ? <UserPlus size={22} color="#ffffff" /> : <Zap size={22} color="#ffffff" />}
+          <div style={{ width: '3.5rem', height: '3.5rem', borderRadius: '1rem', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.25rem', boxShadow: '0 8px 24px rgba(67,67,213,0.3)' }}>
+            {isSignup ? <UserPlus size={24} color="#ffffff" /> : <Zap size={24} color="#ffffff" />}
           </div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>CAPS Automation</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', marginTop: '0.375rem' }}>Next-Gen Organizational Workflow</p>
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.04em', margin: 0 }}>CAPS Automation</h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--color-on-surface-variant)', marginTop: '0.5rem', fontWeight: 500 }}>Management System for Modern Units</p>
         </div>
 
-        <div className="card" style={{ padding: '2rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.5rem', background: 'var(--color-surface-low)', padding: '0.35rem', borderRadius: '0.75rem' }}>
-
-            {['login', 'signup'].map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => { setMode(value); setError(null); setSuccess(null); }}
-                style={{
-                  border: 'none',
-                  borderRadius: '0.55rem',
-                  padding: '0.7rem 0.9rem',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  background: mode === value ? 'var(--color-primary)' : 'transparent',
-                  color: mode === value ? '#fff' : 'var(--color-on-surface-variant)',
-                }}
-              >
-                {value === 'login' ? 'Sign In' : 'Sign Up'}
-              </button>
-            ))}
+        <div className="card" style={{ padding: '2rem', border: '1px solid var(--color-outline-variant)' }}>
+          {/* Mode Switcher */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '2rem', background: 'var(--color-surface-low)', padding: '4px', borderRadius: '12px' }}>
+            <button
+               onClick={() => { setMode('login'); setError(null); setSuccess(null); }}
+               className={`btn-ghost sm ${mode === 'login' ? 'active' : ''}`}
+               style={{ 
+                 borderRadius: '8px', padding: '10px',
+                 background: mode === 'login' ? 'white' : 'transparent',
+                 boxShadow: mode === 'login' ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
+                 color: mode === 'login' ? 'var(--color-primary)' : 'inherit',
+                 fontWeight: 700
+               }}
+            >
+               Sign In
+            </button>
+            <button
+               onClick={() => { setMode('signup'); setError(null); setSuccess(null); }}
+               className={`btn-ghost sm ${mode === 'signup' ? 'active' : ''}`}
+               style={{ 
+                 borderRadius: '8px', padding: '10px',
+                 background: mode === 'signup' ? 'white' : 'transparent',
+                 boxShadow: mode === 'signup' ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
+                 color: mode === 'signup' ? 'var(--color-primary)' : 'inherit',
+                 fontWeight: 700
+               }}
+            >
+               Sign Up
+            </button>
           </div>
 
-          <h2 style={{ fontSize: '1.125rem', fontWeight: 700, marginTop: 0, marginBottom: '1.5rem', letterSpacing: '-0.02em' }}>
-            {isSignup ? 'Create your account' : 'Sign in to your account'}
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginTop: 0, marginBottom: '1.5rem', letterSpacing: '-0.02em' }}>
+            {isSignup ? 'Begin your journey' : 'Welcome back'}
           </h2>
 
-          {error && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', padding: '0.75rem', borderRadius: '0.5rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem', marginBottom: '1rem' }}>
-              <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
-              <span>{error}</span>
-            </div>
-          )}
+          {error && <Alert variant="error" style={{ marginBottom: '1.5rem' }}>{error}</Alert>}
+          {success && <Alert variant="success" style={{ marginBottom: '1.5rem' }}>{success}</Alert>}
 
-          {success && (
-            <div style={{ padding: '0.75rem', borderRadius: '0.5rem', background: '#d1fae5', color: '#065f46', fontSize: '0.8125rem', marginBottom: '1rem' }}>
-              {success}
-            </div>
-          )}
-
-          <form onSubmit={isSignup ? handleSignup : handleLogin}>
+          <form onSubmit={isSignup ? handleSignup : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {isSignup && (
               <>
-                <div style={{ marginBottom: '1rem' }}>
-                  <label className="input-label">Full name</label>
-                  <input className="input-field" value={signupForm.name} onChange={(e) => setSignup('name', e.target.value)} required />
+                <TextField 
+                  label="Full Name" 
+                  icon={User} 
+                  value={signupForm.name} 
+                  onChange={(e) => setSignup('name', e.target.value)} 
+                  required 
+                />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                   <Select 
+                     label="Role" 
+                     value={signupForm.role} 
+                     onChange={(e) => setSignup('role', e.target.value)} 
+                     options={['Volunteer', 'Team Lead', 'Admin', 'Super Admin']} 
+                   />
+                   <TextField 
+                     label="Profession" 
+                     icon={Briefcase} 
+                     value={signupForm.profession} 
+                     onChange={(e) => setSignup('profession', e.target.value)} 
+                   />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <div>
-                    <label className="input-label">Role</label>
-                    <select className="input-field" value={signupForm.role} onChange={(e) => setSignup('role', e.target.value)}>
-                      {['Volunteer', 'Team Lead', 'Admin', 'Super Admin'].map((role) => <option key={role}>{role}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="input-label">Profession</label>
-                    <input className="input-field" value={signupForm.profession} onChange={(e) => setSignup('profession', e.target.value)} />
-                  </div>
-                </div>
-                <div style={{ marginBottom: '1rem' }}>
-                  <label className="input-label">Expertise</label>
-                  <input className="input-field" value={signupForm.expertise} onChange={(e) => setSignup('expertise', e.target.value)} />
-                </div>
+                <TextField 
+                  label="Expertise" 
+                  icon={Award} 
+                  value={signupForm.expertise} 
+                  onChange={(e) => setSignup('expertise', e.target.value)} 
+                />
               </>
             )}
 
-            <div style={{ marginBottom: '1rem' }}>
-              <label className="input-label">Work email</label>
-              <input className="input-field" type="email" placeholder="you@worklog.io" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-            </div>
+            <TextField 
+              label="Work Email" 
+              type="email" 
+              icon={Mail} 
+              autoComplete="email"
+              placeholder="you@worklog.io"
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required 
+            />
 
-            <div style={{ marginBottom: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.375rem' }}>
-                <label className="input-label" style={{ marginBottom: 0 }}>Password</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label className="input-label" style={{ margin: 0 }}>Password</label>
                 {!isSignup && (
-                  <button type="button" style={{ fontSize: '0.8125rem', color: 'var(--color-primary)', fontWeight: 500, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  <button type="button" className="btn-ghost sm" style={{ padding: 0, fontSize: '0.8125rem' }}>
                     Forgot password?
                   </button>
                 )}
               </div>
               <div style={{ position: 'relative' }}>
-                <input className="input-field" type={showPass ? 'text' : 'password'} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ paddingRight: '2.75rem' }} />
-                <button type="button" onClick={() => setShowPass(!showPass)} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-outline)', display: 'flex', padding: 0 }}>
+                <Lock size={18} style={{ position: 'absolute', left: '0.875rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-outline)' }} />
+                <input 
+                  className="input-field" 
+                  type={showPass ? 'text' : 'password'} 
+                  placeholder="Password"
+                  value={password} 
+                  onChange={(e) => setPassword(e.target.value)} 
+                  required 
+                  style={{ paddingLeft: '2.75rem', paddingRight: '2.75rem' }} 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPass(!showPass)} 
+                  style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-outline)', display: 'flex', padding: 0 }}
+                >
                   {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
 
-            <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center', padding: '0.75rem' }}>
-              {loading ? <Loader2 size={16} style={{ animation: 'spin 0.8s linear infinite' }} /> : null}
-              {loading ? (isSignup ? 'Creating account...' : 'Signing in...') : (isSignup ? 'Create Account' : 'Sign In')}
+            <button type="submit" className="btn-primary" disabled={loading} style={{ width: '100%', justifyContent: 'center', padding: '0.875rem', marginTop: '0.5rem' }}>
+              {loading && <Loader2 size={18} className="spin" />}
+              {loading ? (isSignup ? 'Creating Account...' : 'Signing In...') : (isSignup ? 'Create Account' : 'Sign In')}
             </button>
           </form>
 
-          <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>
+          <p style={{ textAlign: 'center', fontSize: '0.8125rem', marginTop: '1.5rem', color: 'var(--color-on-surface-variant)' }}>
             {isSignup ? (
-              <span>Already have an account? <button type="button" onClick={() => setMode('login')} style={{ border: 'none', background: 'none', color: 'var(--color-primary)', padding: 0, cursor: 'pointer', fontWeight: 700 }}>Sign in</button></span>
+              <>Already have an account? <button onClick={() => setMode('login')} style={{ background: 'none', border: 'none', color: 'var(--color-primary)', fontWeight: 700, padding: 0, cursor: 'pointer' }}>Sign in instead</button></>
             ) : (
-              <span>Need an account? <Link to="/signup" style={{ color: 'var(--color-primary)', fontWeight: 700, textDecoration: 'none' }}>Create one</Link></span>
+              <>Don't have an account? <Link to="/signup" style={{ color: 'var(--color-primary)', fontWeight: 700, textDecoration: 'none' }}>Join our network</Link></>
             )}
-          </div>
+          </p>
         </div>
 
-        <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '1.5rem' }}>© 2026 WorkLog Organization System</p>
+        <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', marginTop: '2rem', opacity: 0.5 }}>
+          © 2026 CAPS Organization Workflow. All rights reserved.
+        </p>
       </div>
     </div>
   );

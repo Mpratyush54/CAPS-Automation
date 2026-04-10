@@ -1,0 +1,46 @@
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.topbar-search {
+  min-width: 200px;
+}
+
+.topbar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  background: var(--color-surface-low);
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.topbar-icon-btn:hover {
+  background: var(--color-surface-high);
+}
+
+.topbar-link-btn {
+  position: relative;
+  text-decoration: none;
+}
+
+.topbar-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  background: var(--color-primary);
+  border-radius: 9999px;
+  border: 1.5px solid var(--color-surface-lowest);
+}

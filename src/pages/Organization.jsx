@@ -1,24 +1,20 @@
-import { useEffect, useState, useCallback } from 'react';
-import { PlusCircle, ChevronRight, Users, Building2, Edit2, Trash2, Search, Shield, Info, X, Save, AlertCircle, TrendingUp, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { PlusCircle, Building2, Edit2, Trash2, Shield, X, Save, AlertCircle, RefreshCw, ChevronRight } from 'lucide-react';
 import TopBar from '../components/TopBar';
+import Modal from '../components/Modal';
 import { useAuthStore } from '../store/auth';
 import { ROLES, can } from '../rbac';
-import { api, getErrorMessage, unwrap } from '../lib/api';
 import { SkeletonText, TableSkeleton } from '../components/Skeleton';
 
-const Modal = ({ title, onClose, children }) => (
-  <div className="modal-overlay">
-    <div className="modal-box">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '2rem', paddingBottom: '1rem', borderBottom: '1px solid var(--color-surface-high)' }}>
-        <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700 }}>{title}</h2>
-        <button onClick={onClose} className="btn-secondary" style={{ padding: '0.5rem' }}><X size={24} /></button>
-      </div>
-      <div style={{ flex: 1, padding: '0 2rem 2rem' }}>
-        {children}
-      </div>
-    </div>
-  </div>
-);
+// UI Components
+import Badge from '../components/ui/Badge';
+import SearchBar from '../components/ui/SearchBar';
+import Alert from '../components/ui/Alert';
+import EmptyState from '../components/ui/EmptyState';
+
+// Hooks
+import { useTeams, useUsers, useCreateTeam, useUpdateTeam, useDeleteTeam, useAddTeamMember, useRemoveTeamMember } from '../hooks/useOrganization';
 
 const TeamModal = ({ onClose, onSave, initial = null }) => {
   const [form, setForm] = useState({
@@ -37,413 +33,368 @@ const TeamModal = ({ onClose, onSave, initial = null }) => {
   };
 
   return (
-    <Modal title={initial ? 'Edit Unit' : 'Create New Unit'} onClose={onClose}>
-      <form onSubmit={handleSubmit}>
-        <div style={{ display: 'grid', gap: '0.875rem' }}>
+    <Modal title={initial ? 'Configure Tactical Unit' : 'Establish New Directive Unit'} onClose={onClose}>
+      <form onSubmit={handleSubmit} style={{ background: 'var(--color-surface-lowest)', padding: '0.25rem' }}>
+        <div style={{ display: 'grid', gap: '1.25rem' }}>
           <div>
-            <label className="input-label">Unit Name *</label>
-            <input className="input-field" value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="e.g. General Wing or Finance Committee" />
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Unit Designation *</label>
+            <input 
+              className="input-field" 
+              style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }}
+              value={form.name} 
+              onChange={(e) => set('name', e.target.value)} 
+              required 
+              placeholder="e.g. Strategic Response Wing" 
+            />
           </div>
-          <div><label className="input-label">Focus / Description</label><textarea className="input-field" rows={3} value={form.focus} onChange={(e) => set('focus', e.target.value)} style={{ resize: 'vertical' }} placeholder="Mission or area of responsibility..." /></div>
+          <div>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Operational Focus</label>
+            <textarea 
+              className="input-field" 
+              rows={3} 
+              style={{ borderRadius: '12px', background: 'var(--color-surface-low)', resize: 'none' }}
+              value={form.focus} 
+              onChange={(e) => set('focus', e.target.value)} 
+              placeholder="Primary mission and deployment scope..." 
+            />
+          </div>
         </div>
-        <div className="card-action-row" style={{ marginTop: '1.5rem' }}>
-          <button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</button>
-          <button type="submit" className="btn-primary" style={{ flex: 1, justifyContent: 'center' }}><Save size={14} /> {initial ? 'Save Changes' : 'Create Unit'}</button>
+        <div className="card-action-row" style={{ marginTop: '2rem', gap: '8px' }}>
+          <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1, borderRadius: '12px' }}>Cancel</button>
+          <button type="submit" className="btn-primary" style={{ flex: 1.5, borderRadius: '12px', fontWeight: 800 }}><Save size={14} /> {initial ? 'Update Unit' : 'Initialize Unit'}</button>
         </div>
       </form>
     </Modal>
   );
 };
 
-
 const MemberModal = ({ onClose, onSave, allUsers, existingMemberIds }) => {
   const [search, setSearch] = useState('');
   const [pendingUser, setPendingUser] = useState(null);
   const [role, setRole] = useState(ROLES.VOLUNTEER);
 
-  const filtered = allUsers.filter(u =>
+  const filtered = (allUsers || []).filter(u =>
     !existingMemberIds.has(String(u.id)) &&
     (u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
   ).slice(0, 8);
 
   return (
-    <Modal title="Add Member to Roster" onClose={onClose}>
-      {!pendingUser ? (
-        <div className="stack-gap-1">
-          <div className="search-bar" style={{ background: 'var(--color-surface-low)' }}>
-            <Search size={14} style={{ color: 'var(--color-outline)', marginLeft: '0.75rem' }} />
-            <input
-              autoFocus
-              className="search-input"
-              placeholder="Search by name or email..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ border: 'none', background: 'transparent' }}
+    <Modal title="Operative Assignment" onClose={onClose}>
+      <div style={{ background: 'var(--color-surface-lowest)', padding: '0.25rem' }}>
+        {!pendingUser ? (
+          <div className="stack-gap-1">
+            <SearchBar 
+              autoFocus 
+              placeholder="Search operative by signal..." 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+              containerStyle={{ background: 'var(--color-surface-low)', borderRadius: '12px' }}
             />
-          </div>
-          <div className="stack-gap-05" style={{ maxHeight: '300px', overflowY: 'auto', padding: '2px' }}>
-            {filtered.map(user => (
-              <button
-                key={user.id}
-                className="btn-ghost"
-                style={{ width: '100%', justifyContent: 'flex-start', padding: '0.75rem', textAlign: 'left', border: '1px solid var(--color-surface-high)', borderRadius: '0.75rem' }}
-                onClick={() => setPendingUser(user)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div className="avatar" style={{ width: '2.25rem', height: '2.25rem' }}>{user.name[0]}</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{user.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)' }}>{user.email}</div>
+            <div className="stack-gap-05" style={{ maxHeight: '350px', overflowY: 'auto', padding: '4px', marginTop: '0.5rem' }}>
+              {filtered.map(user => (
+                <button
+                  key={user.id}
+                  className="btn-ghost"
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '1rem', textAlign: 'left', border: '1.5px solid var(--color-outline-variant)', borderRadius: '12px', marginBottom: '8px', transition: 'all 0.2s ease' }}
+                  onClick={() => setPendingUser(user)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div className="avatar" style={{ width: '2.5rem', height: '2.5rem', fontWeight: 800 }}>{user.name[0]}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>{user.name}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--color-on-surface-variant)', fontWeight: 600 }}>{user.email}</div>
+                    </div>
+                    <ChevronRight size={14} opacity={0.3} />
                   </div>
-                </div>
-              </button>
-            ))}
-            {filtered.length === 0 && search && <p style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-outline)' }}>No matching users found.</p>}
-          </div>
-        </div>
-      ) : (
-        <div className="stack-gap-1">
-          <div style={{ padding: '1rem', background: 'var(--color-primary-fixed)', borderRadius: '0.75rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div className="avatar" style={{ width: '2.5rem', height: '2.5rem', background: 'var(--color-on-primary-fixed)', color: 'var(--color-primary-fixed)' }}>{pendingUser.name[0]}</div>
-            <div>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-on-primary-fixed-variant)', fontWeight: 500 }}>Assigning role to</p>
-              <p style={{ margin: '0.125rem 0 0', fontWeight: 700, fontSize: '1rem', color: 'var(--color-on-primary-fixed)' }}>{pendingUser.name}</p>
+                </button>
+              ))}
+              {filtered.length === 0 && search && <EmptyState mini title="No match" message="Agent signal not found." />}
             </div>
           </div>
+        ) : (
+          <div className="stack-gap-1">
+            <div style={{ padding: '1.25rem', background: 'var(--gradient-primary)', borderRadius: '16px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem', color: '#fff', boxShadow: '0 10px 20px rgba(0,0,0,0.1)' }}>
+              <div className="avatar" style={{ width: '3rem', height: '3rem', background: 'rgba(255,255,255,0.2)', color: '#fff', fontSize: '1.25rem', fontWeight: 900 }}>{pendingUser.name[0]}</div>
+              <div>
+                <p style={{ margin: 0, fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', opacity: 0.8 }}>PREPARING ASSIGNMENT FOR</p>
+                <p style={{ margin: '2px 0 0', fontWeight: 800, fontSize: '1.1rem' }}>{pendingUser.name}</p>
+              </div>
+            </div>
 
-          <div className="stack-gap-05">
-            <p style={{ margin: '0.5rem 0 0.5rem', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-on-surface-variant)' }}>Select Organizational Role</p>
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              {[ROLES.VOLUNTEER, ROLES.TEAM_LEAD, ROLES.ADMIN].map(r => {
-                const isActive = role === r;
-                return (
-                  <button
-                    key={r}
-                    className={`btn-ghost`}
-                    style={{
-                      width: '100%',
-                      justifyContent: 'flex-start',
-                      padding: '1rem',
-                      borderRadius: '0.875rem',
-                      border: `1.5px solid ${isActive ? 'var(--color-primary)' : 'var(--color-surface-high)'}`,
-                      background: isActive ? 'var(--color-secondary-fixed-dim)' : 'transparent',
-                      transition: 'all 0.2s ease',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem'
-                    }}
-                    onClick={() => setRole(r)}
-                  >
-                    <div style={{
-                      width: '2rem',
-                      height: '2rem',
-                      borderRadius: '0.5rem',
-                      background: isActive ? 'var(--color-primary)' : 'var(--color-surface-container)',
-                      color: isActive ? '#fff' : 'var(--color-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      <Shield size={16} />
-                    </div>
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.875rem', color: isActive ? 'var(--color-primary)' : 'var(--color-on-surface)' }}>{r}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-on-surface-variant)', opacity: 0.8 }}>Assign as a {r.toLowerCase()} member</div>
-                    </div>
-                    {isActive && <div style={{ marginLeft: 'auto', width: '1.25rem', height: '1.25rem', borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem' }}>✓</div>}
-                  </button>
-                );
-              })}
+            <div className="stack-gap-05">
+              <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Operational Role Permission</label>
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                {[ROLES.VOLUNTEER, ROLES.TEAM_LEAD, ROLES.ADMIN].map(r => {
+                  const isActive = role === r;
+                  return (
+                    <button
+                      key={r}
+                      className="btn-ghost"
+                      style={{
+                        width: '100%', justifyContent: 'flex-start', padding: '1rem', borderRadius: '14px',
+                        border: `2px solid ${isActive ? 'var(--color-primary)' : 'var(--color-outline-variant)'}`,
+                        background: isActive ? 'var(--color-primary-fixed-dim)' : 'var(--color-surface-low)',
+                        transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', gap: '1rem'
+                      }}
+                      onClick={() => setRole(r)}
+                    >
+                      <div style={{
+                        width: '2.25rem', height: '2.25rem', borderRadius: '10px',
+                        background: isActive ? 'var(--color-primary)' : 'rgba(0,0,0,0.05)',
+                        color: isActive ? '#fff' : 'var(--color-primary)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}>
+                        <Shield size={18} />
+                      </div>
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.85rem', color: isActive ? 'var(--color-primary)' : 'var(--color-on-surface)' }}>{r}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--color-on-surface-variant)', fontWeight: 600 }}>Operational {r.toLowerCase()} authorization</div>
+                      </div>
+                      {isActive && <div style={{ marginLeft: 'auto', width: '20px', height: '20px', borderRadius: '50%', background: 'var(--color-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px' }}>✓</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ marginTop: '2rem', display: 'flex', gap: '8px' }}>
+              <button className="btn-ghost" style={{ flex: 1, borderRadius: '12px' }} onClick={() => setPendingUser(null)}>Abort</button>
+              <button className="btn-primary" style={{ flex: 1.5, borderRadius: '12px', fontWeight: 800, justifyContent: 'center' }} onClick={() => onSave(pendingUser, role)}>Deploy Operative</button>
             </div>
           </div>
-          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem' }}>
-            <button className="btn-secondary" style={{ flex: 1, padding: '0.875rem' }} onClick={() => setPendingUser(null)}>Back to search</button>
-            <button className="btn-primary" style={{ flex: 1, padding: '0.875rem', justifyContent: 'center' }} onClick={() => onSave(pendingUser, role)}>Confirm & Add</button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </Modal>
   );
 };
 
 const Organization = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeModal = searchParams.get('modal');
+  const selectedParamId = searchParams.get('id');
+
   const { role } = useAuthStore();
-  const [teams, setTeams] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [search, setSearch] = useState('');
-  const [teamModal, setTeamModal] = useState(null);
-  const [memberModalOpen, setMemberModalOpen] = useState(false);
-  const [deleteModal, setDeleteModal] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  const { data: teams = [], isLoading: isLoadingTeams, error: teamsError, refetch: refetchTeams } = useTeams(search);
+  const { data: allUsers = [] } = useUsers();
+
+  const createTeamMutation = useCreateTeam();
+  const updateTeamMutation = useUpdateTeam();
+  const deleteTeamMutation = useDeleteTeam();
+  const addMemberMutation = useAddTeamMember();
+  const removeMemberMutation = useRemoveTeamMember();
+
+  // Sync state with URL
   useEffect(() => {
-    loadTeams();
-    const uLoad = async () => {
-      try {
-        const uRes = await api.get('/api/organization/users/all');
-        const uData = unwrap(uRes);
-        setAllUsers((uData?.rows || []).map(u => ({ id: String(u._id || u.id), name: u.name, email: u.email })));
-      } catch (e) {
-        console.error('Failed to load user list', e);
-      }
-    };
-    uLoad();
-  }, [debouncedSearch]);
-
-  const loadTeams = async (isMounted = true) => {
-    setLoading(true);
-    try {
-      const response = await api.get('/api/organization/teams', { params: { search: debouncedSearch || undefined } });
-      const payload = unwrap(response);
-      const rows = payload?.rows || [];
-      const nextTeams = rows.map(t => ({ ...t, id: t._id || t.id, name: t.name || 'Unnamed Unit' }));
-      if (isMounted) {
-        setTeams(nextTeams);
-        if (!selectedId && nextTeams.length) {
-          setSelectedId(nextTeams[0].id);
-        }
-      }
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
+    if (selectedParamId && selectedId !== selectedParamId) {
+      setSelectedId(selectedParamId);
+    } else if (!selectedParamId && teams.length > 0 && !selectedId) {
+       setSelectedId(teams[0].id);
     }
+  }, [selectedParamId, teams]);
+
+  const setModal = (m) => {
+    if (!m) {
+      searchParams.delete('modal');
+    } else {
+      searchParams.set('modal', m);
+    }
+    setSearchParams(searchParams);
   };
 
+  const handleSelectTeam = (id) => {
+    setSelectedId(id);
+    searchParams.set('id', id);
+    setSearchParams(searchParams);
+  };
 
-
-
-
-
-
-
-  const selectedTeam = teams.find(t => t.id === selectedId);
-  const displayName = selectedTeam?.name || 'Organization Unit';
-  const activeFocus = selectedTeam;
+  const selectedTeam = teams.find(t => t.id === selectedId) || (teams.length > 0 ? teams[0] : null);
+  const displayName = selectedTeam?.name || 'Tactical Unit';
   const canManageDirectory = can(role, 'manageWings');
+  const error = teamsError?.message || createTeamMutation.error?.message || updateTeamMutation.error?.message || deleteTeamMutation.error?.message || addMemberMutation.error?.message || removeMemberMutation.error?.message;
 
   const saveTeam = async (data) => {
-    setError(null);
-    try {
-      const isEdit = !!data.id;
-      const endpoint = isEdit ? `/api/organization/teams/${data.id}` : '/api/organization/teams';
-      const method = isEdit ? 'patch' : 'post';
-      const response = await api[method](endpoint, data);
-      const raw = unwrap(response);
-      const saved = { ...raw, id: raw._id || raw.id };
-
-      setTeams(prev => isEdit
-        ? prev.map(t => t.id === saved.id ? saved : t)
-        : [saved, ...prev]
-      );
-      setSelectedId(saved.id);
-      setTeamModal(null);
-
-      setTimeout(() => loadTeams(), 500);
-    } catch (err) {
-      setError(getErrorMessage(err, 'Unable to save unit entry.'));
+    if (data.id) {
+      await updateTeamMutation.mutateAsync({ id: data.id, teamData: data });
+    } else {
+      const saved = await createTeamMutation.mutateAsync(data);
+      handleSelectTeam(saved?._id || saved?.id);
     }
+    setModal(null);
   };
-
 
   const addMember = async (user, userRole) => {
     if (!selectedId) return;
-    try {
-      // 1. Add to the team member list and update user's researchRole
-      await api.post(`/api/organization/teams/${selectedId}/members`, { userId: user.id, role: userRole });
-
-      setMemberModalOpen(false);
-      loadTeams();
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to add member.'));
-    }
+    await addMemberMutation.mutateAsync({ teamId: selectedId, memberData: { userId: user.id, role: userRole } });
+    setModal(null);
   };
 
   const removeMember = async (memberId) => {
-    const teamId = selectedTeam?.id;
-    if (!teamId) return;
-    try {
-      await api.delete(`/api/organization/teams/${teamId}/members/${memberId}`);
-      loadTeams();
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to remove member.'));
-    }
+    if (!selectedId) return;
+    await removeMemberMutation.mutateAsync({ teamId: selectedId, userId: memberId });
   };
 
   const deleteTeam = async () => {
-    if (!deleteModal?.id) return;
-    try {
-      await api.delete(`/api/organization/teams/${deleteModal.id}`);
-      setTeams(prev => prev.filter(t => t.id !== deleteModal.id));
-      if (selectedId === deleteModal.id) setSelectedId(null);
-      setDeleteModal(null);
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to delete entry.'));
-    }
+    if (activeModal !== 'delete' || !selectedId) return;
+    await deleteTeamMutation.mutateAsync(selectedId);
+    setSelectedId(null);
+    searchParams.delete('id');
+    setModal(null);
   };
 
   const pageTitles = {
-    [ROLES.TEAM_LEAD]: 'My Team Directory',
-    [ROLES.ADMIN]: 'Organization Directory',
-    [ROLES.SUPER_ADMIN]: 'Full Organization Directory',
+    [ROLES.TEAM_LEAD]: 'Unit Roster',
+    [ROLES.ADMIN]: 'Operational Directory',
+    [ROLES.SUPER_ADMIN]: 'Full Organizational Intelligence',
   };
 
   return (
     <>
       <TopBar title={pageTitles[role] || 'Organization'} />
       <div className="page-body">
-        {error && (
-          <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
+        {error && <Alert variant="error">{error}</Alert>}
 
-        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem' }}>
           {canManageDirectory && (
-            <button className="btn-primary" onClick={() => setTeamModal({ team: null })}><PlusCircle size={14} /> Add New Unit</button>
+            <button className="btn-primary" onClick={() => setModal('add_unit')} style={{ borderRadius: '12px' }}><PlusCircle size={14} /> Establish New Unit</button>
           )}
         </div>
 
-        <div className="mobile-safe-grid" style={{ gridTemplateColumns: 'minmax(280px, 300px) minmax(0, 1fr)', alignItems: 'start', height: 'calc(100vh - 12rem)' }}>
-          <div className="card" style={{ padding: '0.875rem', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <div className="card-flex-between" style={{ marginBottom: '0.75rem' }}>
-              <h3 style={{ margin: 0, fontSize: '0.875rem', fontWeight: 700 }}>Unit Directory</h3>
-              <div style={{ display: 'flex', gap: '0.25rem' }}>
-                <button className="btn-ghost" style={{ padding: '0.25rem' }} onClick={() => loadTeams()} title="Refresh Directory"><RefreshCw size={14} /></button>
-              </div>
+        <div className="mobile-safe-grid stack-mobile" style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 320px) minmax(0, 1fr)', alignItems: 'start', minHeight: 'calc(100vh - 12rem)', gap: '1.5rem' }}>
+          <div className="card" style={{ padding: '1rem', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: 'var(--color-surface-low)', border: '1px solid var(--color-outline-variant)' }}>
+            <div className="card-flex-between" style={{ marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--color-on-surface-variant)' }}>Units Directory</h3>
+              <button className="btn-ghost" style={{ padding: '0.25rem' }} onClick={() => refetchTeams()} title="Sync Signals"><RefreshCw size={14} /></button>
             </div>
 
-            <div className="search-bar" style={{ marginBottom: '1rem' }}>
-              <Search size={14} style={{ color: 'var(--color-outline)' }} />
-              <input placeholder="Search directory..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
+            <SearchBar 
+              placeholder="Filter units..." 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+              containerStyle={{ marginBottom: '1.5rem', borderRadius: '12px', background: 'var(--color-surface-lowest)' }}
+            />
 
-            <div className="stack-gap-1"> 
-              {loading && teams.length === 0 ? (
-                <>
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} style={{ padding: '0.5rem' }}><SkeletonText width="80%" height="1.5rem" /></div>
-                  ))}
-                </>
+            <div className="stack-gap-1" style={{ flex: 1 }}> 
+              {isLoadingTeams && teams.length === 0 ? (
+                <TableSkeleton rows={8} cols={1} />
               ) : (
-                <>
-                  {teams.filter(t => (t?.name || '').toLowerCase().includes(
-                    (search || '').toLowerCase())).map(team => {
-                      const isActive = selectedId === team.id;
-                      return (
-                        <button key={team.id} onClick={() => setSelectedId(team.id)}
-                          className={`btn-ghost ${isActive ? 'active' : ''}`}
-                          style={{
-                            width: '100%', justifyContent: 'flex-start',
-                            padding: '0.5rem', fontWeight: 600, fontSize: '0.8125rem', background: isActive ? 'rgba(67, 67, 213, 0.1)' : 'transparent', borderRadius: '0.5rem'
-                          }} >
-                          <Users size={13} style={{ marginRight: '0.5rem' }} /> {team.name} </button>);
-                    })}
-                </>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {teams.map(team => {
+                    const isActive = selectedId === team.id;
+                    return (
+                      <button key={team.id} onClick={() => handleSelectTeam(team.id)}
+                        className={`btn-ghost ${isActive ? 'active' : ''}`}
+                        style={{
+                          width: '100%', justifyContent: 'flex-start',
+                          padding: '0.75rem 1rem', fontWeight: 800, fontSize: '0.85rem', 
+                          background: isActive ? 'var(--color-primary-fixed-dim)' : 'transparent', 
+                          color: isActive ? 'var(--color-primary)' : 'var(--color-on-surface)',
+                          borderRadius: '12px',
+                          border: isActive ? '1px solid var(--color-primary-fixed)' : '1px solid transparent'
+                        }} >
+                        <Building2 size={16} style={{ marginRight: '0.75rem', opacity: isActive ? 1 : 0.4 }} /> {team.name} </button>);
+                  })}
+                </div>
               )}
             </div>
 
-            {!loading && teams.length === 0 && (
-              <p style={{ textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-outline)', padding: '1rem' }}>No organizational units found.</p>
+            {!isLoadingTeams && teams.length === 0 && (
+              <EmptyState mini title="Quiet Signals" message="No units found." />
             )}
           </div>
 
-          <div className="card-column">
-            {activeFocus ? (
-              <div className="stack-gap-1">
-                <div className="card" style={{ background: 'var(--gradient-primary)', color: '#fff', position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: '-10%', right: '-5%', opacity: 0.1, pointerEvents: 'none' }}><Building2 size={120} /></div>
+          <div className="card-column org-content-column" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {selectedTeam ? (
+              <>
+                <div className="card org-hero-card" style={{ background: 'var(--gradient-primary)', color: '#fff', position: 'relative', overflow: 'hidden', padding: '2.5rem', borderRadius: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' }}>
+                  <div style={{ position: 'absolute', top: '-10%', right: '-5%', opacity: 0.1, pointerEvents: 'none', transform: 'rotate(15deg)' }}><Building2 size={200} /></div>
                   <div className="card-flex-between" style={{ alignItems: 'flex-start', position: 'relative', zIndex: 1 }}>
-                    <div>
-                      <h2 style={{ margin: '0 0 0.25rem', fontSize: '1.25rem', fontWeight: 700, color: '#fff' }}>{displayName}</h2>
-
-                      <p style={{ margin: '0.75rem 0 0', fontSize: '0.8125rem', opacity: 0.84, fontStyle: activeFocus.focus ? 'normal' : 'italic' }}>{activeFocus.focus || activeFocus.description || 'No focus description available.'}</p>
+                    <div className="org-hero-copy" style={{ maxWidth: '70%' }}>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '0.5rem', opacity: 0.8 }}>TACTICAL UNIT DESIGNATION</div>
+                      <h2 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.5px' }}>{displayName}</h2>
+                      <p style={{ margin: '1.5rem 0 0', fontSize: '0.95rem', opacity: 0.9, lineHeight: 1.6, fontWeight: 500 }}>{selectedTeam.focus || selectedTeam.description || 'Focus description pending in HQ records.'}</p>
                     </div>
-                    <div className="card-action-row" style={{ flexShrink: 0 }}>
-                      {canManageDirectory && <button className="btn-ghost" style={{ background: 'rgba(255,255,255,0.15)', color: '#fff', border: 'none' }} onClick={() => setTeamModal({ team: selectedTeam })}><Edit2 size={13} /> Edit</button>}
-                      {canManageDirectory && <button style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '0.375rem', padding: '0.375rem 0.75rem', color: '#fff', cursor: 'pointer', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.375rem' }} onClick={() => setDeleteModal(selectedTeam)}><Trash2 size={13} /> Delete</button>}
+                    <div className="org-hero-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
+                      {canManageDirectory && <button className="btn-secondary" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', borderRadius: '12px', backdropFilter: 'blur(10px)' }} onClick={() => setModal('edit_unit')}><Edit2 size={14} /> Configure</button>}
+                      {canManageDirectory && <button className="btn-secondary" style={{ background: 'rgba(255,0,0,0.2)', border: 'none', borderRadius: '12px', color: '#fff', backdropFilter: 'blur(10px)' }} onClick={() => setModal('delete')}><Trash2 size={14} /> Purge</button>}
                     </div>
                   </div>
                 </div>
 
-                <div className="card table-card" style={{ height: 'fit-content' }}>
-                  <div className="card-flex-between" style={{ padding: '1rem 1.25rem' }}>
-                    <h3 style={{ margin: 0, fontSize: '0.9375rem', fontWeight: 600 }}>{displayName} Members</h3>
+                <div className="card table-card" style={{ height: 'fit-content', borderRadius: '24px', overflow: 'hidden', border: '1px solid var(--color-outline-variant)' }}>
+                  <div className="card-flex-between org-roster-header" style={{ padding: '1.5rem 2rem', background: 'var(--color-surface-low)', borderBottom: '1px solid var(--color-outline-variant)' }}>
+                    <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>UNIT ROSTER <span style={{ opacity: 0.4, marginLeft: '8px', fontWeight: 400 }}>| {(selectedTeam?.members || []).length} Operatives</span></h3>
                     {canManageDirectory && (
-                      <button className="btn-primary" style={{ padding: '0.4rem 0.75rem', fontSize: '0.75rem' }} onClick={() => setMemberModalOpen(true)}>
-                        <PlusCircle size={12} /> Add Member
+                      <button className="btn-primary sm" style={{ borderRadius: '12px' }} onClick={() => setModal('add_member')}>
+                        <PlusCircle size={14} /> Deploy Operative
                       </button>
                     )}
                   </div>
 
                   <table className="data-table">
-                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-                    <tbody>
-                      {loading ? (
-                        <TableSkeleton rows={5} cols={4} />
-                      ) : (
-                        <>
-                          {(selectedTeam?.members || []).map((member) => (
-                            <tr key={member.id}>
-                              <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                {member.name}
-                                {member.isLead && <span title="Team Lead / Admin" style={{ color: 'var(--color-primary)', display: 'flex' }}><Shield size={12} fill="currentColor" fillOpacity={0.2} /></span>}
-                              </td>
-                              <td style={{ color: 'var(--color-on-surface-variant)', fontSize: '0.8125rem' }}>{member.email}</td>
-                              <td><span className={`badge ${member.isLead ? 'badge-primary' : 'badge-neutral'}`} style={{ fontWeight: member.isLead ? 700 : 400 }}>{member.role}</span></td>
-                              <td style={{ textAlign: 'right' }}>
-                                {canManageDirectory && <button className="btn-ghost" onClick={() => removeMember(member.id)} style={{ color: 'var(--color-error)', border: 'none', cursor: 'pointer', background: 'transparent' }}><Trash2 size={13} /></button>}
-                              </td>
-                            </tr>
-                          ))}
-                          {(!selectedTeam?.members || selectedTeam.members.length === 0) && (
-                            <tr><td colSpan="4" style={{ textAlign: 'center', padding: '2rem', color: 'var(--color-outline)' }}>No members listed in this unit. Click "Add Member" to populate the roster.</td></tr>
-                          )}
-                        </>
+                    <thead><tr><th>Designation</th><th>Signal Address</th><th>Authorization Role</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+                    <tbody style={{ background: 'var(--color-surface-lowest)' }}>
+                      {(selectedTeam?.members || []).map((member) => (
+                        <tr key={member.id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                               <div className="avatar" style={{ width: '2rem', height: '2rem', fontSize: '0.75rem', fontWeight: 800 }}>{member.name[0]}</div>
+                               <span style={{ fontWeight: 600 }}>{member.name} {member.isLead && <Badge variant="primary" mini style={{ marginLeft: '4px' }}>LEAD</Badge>}</span>
+                            </div>
+                          </td>
+                          <td style={{ color: 'var(--color-on-surface-variant)', fontSize: '0.8rem', fontWeight: 600 }}>{member.email}</td>
+                          <td>
+                            <Badge variant={member.isLead ? 'primary' : 'neutral'} style={{ borderRadius: '6px', fontSize: '0.65rem' }}>{member.role}</Badge>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {canManageDirectory && <button className="btn-icon sm" onClick={() => removeMember(member.id)} style={{ color: 'var(--color-error)' }}><Trash2 size={14} /></button>}
+                          </td>
+                        </tr>
+                      ))}
+                      {(!selectedTeam?.members || selectedTeam.members.length === 0) && (
+                        <tr><td colSpan="4" style={{ textAlign: 'center', padding: '4rem', color: 'var(--color-outline)' }}><EmptyState mini title="Zero Roster" message="No operatives currently assigned to this mission unit." /></td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
-              </div>
-            ) : !loading && (
-              <div className="card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                <Info size={32} style={{ color: 'var(--color-outline)', marginBottom: '1rem' }} />
-                <p style={{ margin: 0, fontWeight: 600 }}>Select an Organizational Unit</p>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.875rem', color: 'var(--color-on-surface-variant)' }}>Browse the directory on the left to see members and focus areas.</p>
-              </div>
+              </>
+            ) : !isLoadingTeams && (
+              <EmptyState 
+                title="Select Tactical Unit" 
+                message="Choose a mission unit from the directory to view roster and directives." 
+              />
             )}
           </div>
         </div>
 
-        {teamModal && <TeamModal initial={teamModal.team} onClose={() => setTeamModal(null)} onSave={saveTeam} />}
-        {memberModalOpen && (
+        {/* MODALS */}
+        {(activeModal === 'add_unit' || activeModal === 'edit_unit') && <TeamModal initial={activeModal === 'edit_unit' ? selectedTeam : null} onClose={() => setModal(null)} onSave={saveTeam} />}
+        {activeModal === 'add_member' && (
           <MemberModal
             allUsers={allUsers}
             existingMemberIds={new Set(selectedTeam?.members?.map(m => String(m.id)))}
-            onClose={() => setMemberModalOpen(false)}
+            onClose={() => setModal(null)}
             onSave={addMember}
           />
         )}
 
-        {deleteModal && (
-          <div className="modal-overlay">
-            <div className="modal-box" style={{ justifyContent: 'center', alignItems: 'center', padding: '2rem' }}>
-               <div style={{ maxWidth: '400px', textAlign: 'center' }}>
-                  <AlertCircle size={48} style={{ color: 'var(--color-error)', marginBottom: '1rem' }} />
-                  <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, marginBottom: '0.5rem' }}>Confirm Delete</h2>
-                  <p style={{ fontSize: '1rem', color: 'var(--color-on-surface-variant)', marginBottom: '2rem' }}>
-                    Are you sure you want to delete <strong style={{ color: 'var(--color-on-surface)' }}>{deleteModal.name}</strong>? This action cannot be undone.
-                  </p>
-                  <div className="card-action-row" style={{ justifyContent: 'center' }}>
-                    <button className="btn-secondary" onClick={() => setDeleteModal(null)} style={{ flex: 1, padding: '0.75rem' }}>Cancel</button>
-                    <button className="btn-primary" onClick={deleteTeam} style={{ flex: 1, padding: '0.75rem', justifyContent: 'center', background: 'var(--color-error)' }}>Delete</button>
-                  </div>
-               </div>
+        {activeModal === 'delete' && selectedTeam && (
+          <Modal title="Confirm Purge" onClose={() => setModal(null)} maxWidth="420px">
+            <div style={{ textAlign: 'center', padding: '1rem' }}>
+                <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--color-error-container)', color: 'var(--color-error)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
+                    <Trash2 size={32} />
+                </div>
+                <h3 style={{ margin: '0 0 0.5rem', fontWeight: 800 }}>PURGE TACTICAL UNIT?</h3>
+                <p style={{ fontSize: '0.9rem', color: 'var(--color-on-surface-variant)', lineHeight: 1.6, marginBottom: '2rem' }}>
+                    This will permanently dissolve <strong style={{ color: 'var(--color-on-surface)' }}>{selectedTeam.name}</strong> and all associated rosters. This action is final.
+                </p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn-ghost" style={{ flex: 1, borderRadius: '12px' }} onClick={() => setModal(null)}>Abort</button>
+                    <button className="btn-primary" style={{ flex: 1.5, background: 'var(--color-error)', borderColor: 'var(--color-error)', borderRadius: '12px', fontWeight: 800 }} onClick={deleteTeam}>Dissolve Unit</button>
+                </div>
             </div>
-          </div>
+          </Modal>
         )}
       </div>
     </>

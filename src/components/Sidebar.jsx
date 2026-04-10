@@ -6,6 +6,7 @@ import {
 import { useAuthStore } from '../store/auth';
 import { getNavItems, ROLES } from '../rbac';
 import { useSidebarStore } from '../store/sidebar';
+import { useUiStore } from '../store/ui';
 
 const ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell };
 
@@ -23,33 +24,23 @@ const Sidebar = () => {
   const roleStyle = roleColors[role] || roleColors[ROLES.VOLUNTEER];
 
   const { isOpen, close } = useSidebarStore();
+  const isMobile = useUiStore((s) => s.isMobile);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
   const handleNavClick = () => {
-    if (window.innerWidth <= 768) close();
+    if (isMobile) close();
   };
 
   return (
     <>
       {/* Backdrop */}
-      {isOpen && (
-        <div
-          onClick={close}
-          style={{
-            display: 'block',
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,.45)',
-            backdropFilter: 'blur(2px)',
-            zIndex: 49,
-          }}
-        />
-      )}
+      {isOpen && <div onClick={close} className="sidebar-backdrop" />}
 
       <aside className={`sidebar${isOpen ? ' open' : ''}`}>
         {/* Logo + close btn row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', padding: '0 0.5rem' }}>
-          <div className="sidebar-logo" style={{ margin: 0, padding: 0 }}>
+        <div className="sidebar-head-row">
+          <div className="sidebar-logo sidebar-logo-compact">
             <Zap size={18} style={{ display: 'inline', marginRight: '6px', color: '#6b6bff' }} />
             CAPS<span>Automation</span>
           </div>
@@ -115,25 +106,6 @@ const Sidebar = () => {
         </div>
       </aside>
 
-      <style>{`
-        .sidebar-close-btn {
-          display: none;
-          align-items: center;
-          justify-content: center;
-          width: 2rem;
-          height: 2rem;
-          border: none;
-          background: var(--color-surface-high);
-          border-radius: 0.5rem;
-          cursor: pointer;
-          color: var(--color-on-surface-variant);
-          transition: background 0.15s;
-        }
-        .sidebar-close-btn:hover { background: var(--color-surface-highest); }
-        @media (max-width: 768px) {
-          .sidebar-close-btn { display: flex; }
-        }
-      `}</style>
     </>
   );
 };

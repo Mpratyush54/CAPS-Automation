@@ -85,7 +85,7 @@ export const getNavItems = (role) => {
     { to: '/dashboard',    label: 'Dashboard',    icon: 'LayoutDashboard' },
     { to: '/logs',         label: 'Logs',          icon: 'ClipboardList' },
     { to: '/events',       label: 'Events',        icon: 'Calendar' },
-    { to: '/moms',         label: 'MOMs',          icon: 'FileText' },
+    { to: '/moms',         label: 'MOMs',          icon: 'FileText',    minRole: ROLES.TEAM_LEAD },
     { to: '/reports',      label: 'Stats',         icon: 'BarChart3',   minRole: ROLES.TEAM_LEAD },
     { to: '/report-center',label: 'Reports',       icon: 'FileText',    minRole: ROLES.TEAM_LEAD },
     { to: '/organization', label: 'Organization',  icon: 'Building2',   minRole: ROLES.TEAM_LEAD },

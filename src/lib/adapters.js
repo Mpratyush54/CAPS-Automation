@@ -43,34 +43,41 @@ export const normalizeLog = (log, currentUserId) => {
   };
 };
 
-export const normalizeEvent = (event) => ({
-  id: event._id || event.id,
-  title: event.title || '',
-  date: formatDateInput(event.eventDate || event.date),
-  time: event.startTime || event.time || '',
-  location: event.location || '',
-  wing: scopeName(event.wing) || event.wingName || '',
-  committee: scopeName(event.committee) || event.committeeName || '',
-  attendees: Number(event.attendeeCount ?? event.attendees ?? 0),
-  status: titleizeStatus(event.status || 'upcoming'),
-  assignedTo: event.assignedRoleVisibility || event.assignedTo || ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'],
-  description: event.description || '',
-  teams: (event.teams || []).map(t => ({ id: t.id || t._id || t, name: t.name || 'Unnamed Team' })),
-  report: {
-    status: titleizeStatus(event.report?.status || event.eventReport?.status || 'draft'),
-    owner: event.report?.owner || event.eventReport?.owner || event.reportOwner || 'Unassigned',
-    lastUpdated: formatDateInput(event.report?.updatedAt || event.eventReport?.updatedAt || event.report?.lastUpdated || event.eventReport?.lastUpdated) || '-',
-    summary: event.report?.summary || event.eventReport?.summary || '',
-  },
-  photos: (event.photos || []).map((photo) => ({
-    id: photo._id || photo.id,
-    name: photo.fileName || photo.name,
-    uploadedBy: photo.uploadedByName || photo.uploadedBy || 'Unknown',
-    status: titleizeStatus(photo.status || 'uploaded'),
-    driveFolder: photo.folderUrl || photo.driveFolder || photo.folderId || '',
-    uploadedAt: photo.createdAt || photo.uploadedAt || '',
-  })),
-});
+export const normalizeEvent = (event) => {
+  const idValue = event._id || event.id;
+  const id = typeof idValue === 'object' && idValue?.$oid ? idValue.$oid : String(idValue || '');
+  
+  return {
+    id,
+    title: event.title || '',
+    date: formatDateInput(event.eventDate || event.date),
+    time: event.startTime || event.time || '',
+    location: event.location || '',
+    wing: scopeName(event.wing) || event.wingName || '',
+    committee: scopeName(event.committee) || event.committeeName || '',
+    attendees: Number(event.attendeeCount ?? event.attendees ?? 0),
+    status: titleizeStatus(event.status || 'upcoming'),
+    assignedTo: event.assignedRoleVisibility || event.assignedTo || ['Volunteer', 'Team Lead', 'Admin', 'Super Admin'],
+    description: event.description || '',
+    teamIds: event.teamIds || [],
+    conceptNoteFileId: event.conceptNoteFileId || null,
+    teams: (event.teams || []).map(t => ({ id: t.id || t._id || t, name: t.name || 'Unnamed Team' })),
+    report: {
+      status: titleizeStatus(event.report?.status || event.eventReport?.status || 'draft'),
+      owner: event.report?.owner || event.eventReport?.owner || event.reportOwner || 'Unassigned',
+      lastUpdated: formatDateInput(event.report?.updatedAt || event.eventReport?.updatedAt || event.report?.lastUpdated || event.eventReport?.lastUpdated) || '-',
+      summary: event.report?.summary || event.eventReport?.summary || '',
+    },
+    photos: (event.photos || []).map((photo) => ({
+      id: photo._id || photo.id,
+      name: photo.fileName || photo.name,
+      uploadedBy: photo.uploadedByName || photo.uploadedBy || 'Unknown',
+      status: titleizeStatus(photo.status || 'uploaded'),
+      driveFolder: photo.folderUrl || photo.driveFolder || photo.folderId || '',
+      uploadedAt: photo.createdAt || photo.uploadedAt || '',
+    })),
+  };
+};
 
 export const normalizeNotification = (item) => ({
   id: item._id || item.id,

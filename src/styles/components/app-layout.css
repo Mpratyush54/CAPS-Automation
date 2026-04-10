@@ -1,0 +1,28 @@
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-background);
+}
+
+.main-content {
+  margin-left: 240px;
+  flex: 1;
+  min-height: 100vh;
+  overflow-x: clip;
+  min-width: 0;
+  background: var(--color-background);
+  transition: margin-left 0.25s cubic-bezier(.4, 0, .2, 1), background 0.25s;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+    padding-bottom: 4.5rem;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .main-content {
+    margin-left: 200px;
+  }
+}

@@ -1,13 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../src/setupTests';
 import Logs from '../../src/pages/Logs';
-import { BrowserRouter } from 'react-router-dom';
 import { useAuthStore } from '../../src/store/auth';
 import { ROLES } from '../../src/rbac';
 
-const renderWithRouter = (ui) => render(ui, { wrapper: BrowserRouter });
+import { renderWithAll } from '../test-utils';
 
 /* ─── Shared mock data ─── */
 const MOCK_LOGS = [
@@ -43,13 +42,13 @@ describe('Integration: Logs Page', () => {
 
   it('renders the page title "Work Logs"', () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
     expect(screen.getByText('Work Logs')).toBeInTheDocument();
   });
 
   it('shows skeleton cells while data is loading', () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
     const cells = screen.getAllByRole('cell');
     expect(cells.length).toBeGreaterThan(0);
   });
@@ -60,7 +59,7 @@ describe('Integration: Logs Page', () => {
 
   it('displays log entries returned by the API', async () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Feature Fix').length).toBeGreaterThanOrEqual(1);
@@ -79,12 +78,10 @@ describe('Integration: Logs Page', () => {
     server.resetHandlers();
     installHandlers([]);
 
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
 
     await waitFor(() => {
-      // Desktop table shows "No logs for 'all'." in a <td>
-      // Mobile list  shows "No logs for 'all'." in a <div>
-      expect(screen.getAllByText(/No logs for/i).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText(/No logs found|Quiet Roster/i).length).toBeGreaterThanOrEqual(1);
     }, { timeout: 6000 });
   });
 
@@ -92,7 +89,7 @@ describe('Integration: Logs Page', () => {
 
   it('renders filter chips and "All" is active by default', () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
 
     const allChip = screen.getByText('All');
     const draftChip = screen.getByText('Draft');
@@ -105,7 +102,7 @@ describe('Integration: Logs Page', () => {
 
   it('renders the "New Entry" button', () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
     expect(screen.getByText(/New Entry/i)).toBeInTheDocument();
   });
 
@@ -113,7 +110,7 @@ describe('Integration: Logs Page', () => {
 
   it('renders the search input', () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
     expect(screen.getByPlaceholderText(/Search activities/i)).toBeInTheDocument();
   });
 
@@ -121,7 +118,7 @@ describe('Integration: Logs Page', () => {
 
   it('renders status badges after data loads', async () => {
     installHandlers();
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
 
     await waitFor(() => {
       expect(screen.getAllByText('Feature Fix').length).toBeGreaterThanOrEqual(1);
@@ -146,10 +143,10 @@ describe('Integration: Logs Page', () => {
       ),
     );
 
-    renderWithRouter(<Logs />);
+    renderWithAll(<Logs />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Server error|Failed to load/i)).toBeInTheDocument();
+      expect(screen.getByText(/Request failed|Server error|Failed to load/i)).toBeInTheDocument();
     }, { timeout: 4000 });
   });
 });

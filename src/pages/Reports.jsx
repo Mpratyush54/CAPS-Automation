@@ -1,14 +1,22 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid, PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { Download, TrendingUp, TrendingDown, Clock, CheckCircle2, Info, ChevronDown, AlertCircle, BarChart3, PieChart as PieIcon } from 'lucide-react';
+import { Download, Clock, CheckCircle2 } from 'lucide-react';
 import TopBar from '../components/TopBar';
 import { useAuthStore } from '../store/auth';
 import { ROLES } from '../rbac';
-import { api, getErrorMessage, unwrap } from '../lib/api';
 import { Skeleton, SkeletonText, SkeletonTitle, SkeletonButton, TableSkeleton } from '../components/Skeleton';
+
+// UI Components
+import KpiCard from '../components/ui/KpiCard';
+import Select from '../components/ui/Select';
+import Alert from '../components/ui/Alert';
+
+// Hooks
+import { useStats } from '../hooks/useReports';
+import { useTeams } from '../hooks/useOrganization';
 
 const ReportsSkeleton = () => (
   <div className="page-body">
@@ -57,110 +65,28 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-const Select = ({ value, onChange, options }) => (
-  <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', minWidth: '11rem', maxWidth: '100%' }}>
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        appearance: 'none', background: 'var(--color-surface-lowest)', border: '1.5px solid var(--color-surface-high)',
-        borderRadius: '0.5rem', padding: '0.4375rem 2rem 0.4375rem 0.75rem', fontSize: '0.8125rem',
-        fontFamily: 'Inter, sans-serif', color: 'var(--color-on-surface)', cursor: 'pointer', fontWeight: 500, width: '100%',
-      }}
-    >
-      {options.map((o) => typeof o === 'string' ? <option key={o} value={o}>{o}</option> : <option key={o.id} value={o.id}>{o.name}</option>)}
-    </select>
-    <ChevronDown size={13} style={{ position: 'absolute', right: '0.5rem', color: 'var(--color-outline)', pointerEvents: 'none' }} />
-  </div>
-);
-
-const KpiCards = ({ kpi, label }) => (
-  <div className="grid-cols-4" style={{ marginBottom: '1.25rem' }}>
-    {[
-      { title: `Total Hours`, value: kpi.hours, icon: Clock, up: true },
-      { title: 'Logs Submitted', value: kpi.logs, icon: CheckCircle2, up: true },
-      { title: 'Events', value: kpi.events, icon: CheckCircle2, up: true },
-      { title: 'Efficiency', value: kpi.efficiency, icon: TrendingUp, up: parseInt(kpi.efficiency, 10) >= 80 },
-    ].map(({ title, value, icon: Icon, up }) => (
-      <div key={title} className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-          <span className="card-title" style={{ margin: 0 }}>{title}</span>
-          <Icon size={13} style={{ color: up ? '#059669' : 'var(--color-error)' }} />
-        </div>
-        <p style={{ margin: '0 0 0.25rem', fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.04em' }}>{value}</p>
-        <span style={{ fontSize: '0.75rem', color: up ? '#059669' : 'var(--color-error)', fontWeight: 600 }}>
-          {up ? <TrendingUp size={10} style={{ display: 'inline', marginRight: 2 }} /> : <TrendingDown size={10} style={{ display: 'inline', marginRight: 2 }} />}
-          Current period
-        </span>
-      </div>
-    ))}
-  </div>
-);
-
 const Reports = () => {
   const { role, user } = useAuthStore();
-  const [teams, setTeams] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(user?.teamId || user?.committee || '');
   const [viewMode, setViewMode] = useState((role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) ? 'Global' : 'Unit');
   
-  const [statsData, setStatsData] = useState({
+  const { data: teams = [] } = useTeams();
+  const { data: stats, isLoading, error: statsError } = useStats(viewMode === 'Global' ? 'global' : 'team', selectedTeam);
+
+  const statsData = stats?.overview || {
     kpi: { hours: '0', logs: '0', events: '0', efficiency: '0%' },
     weekly: [],
     pie: [],
     monthly: [],
-  });
-  const [breakdownRows, setBreakdownRows] = useState([]);
-  const [contributions, setContributions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const response = await api.get('/api/organization/teams');
-        const payload = unwrap(response);
-        const rows = payload.rows || [];
-        
-        // Normalize teams
-        const allTeams = rows.map(t => ({ ...t, id: t._id || t.id, name: t.name || 'Unnamed Unit' }));
-        setTeams(allTeams);
-      } catch (e) {
-        console.error('Failed to load organization scope', e);
-      }
-    };
-    init();
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadStats = async () => {
-      setLoading(true);
-      try {
-        const view = viewMode === 'Global' ? 'global' : 'team';
-        const [overviewRes, breakdownRes, contribRes] = await Promise.all([
-          api.get('/api/stats/overview', { params: { view, teamId: selectedTeam } }),
-          api.get('/api/stats/breakdown', { params: { view: view === 'global' ? 'global' : 'team', teamId: selectedTeam } }),
-          api.get('/api/stats/contributions', { params: { teamId: selectedTeam } })
-        ]);
-        if (!mounted) return;
-        setStatsData(unwrap(overviewRes));
-        setBreakdownRows(unwrap(breakdownRes).rows || []);
-        setContributions(unwrap(contribRes).rows || []);
-        setError(null);
-      } catch (err) {
-        if (mounted) setError(getErrorMessage(err, 'Failed to load report data.'));
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-    loadStats();
-    return () => { mounted = false; };
-  }, [viewMode, selectedTeam]);
+  };
+  const breakdownRows = stats?.breakdown?.rows || [];
+  const contributions = stats?.contributions?.rows || [];
 
   const pageTitle = role === ROLES.TEAM_LEAD ? 'Team Stats' : role === ROLES.ADMIN ? 'Wing Analytics' : 'Organization Dashboard';
   const monthlyChartData = MONTHS.map((m, i) => ({ month: m, v: statsData.monthly?.[i] || 0 }));
+  const error = statsError?.message;
 
-  if (loading && (statsData.weekly.length === 0 || statsData.monthly.length === 0)) {
+  if (isLoading && (statsData.weekly.length === 0 || statsData.monthly.length === 0)) {
     return (
       <>
         <TopBar title={pageTitle} />
@@ -173,15 +99,11 @@ const Reports = () => {
     <>
       <TopBar title={pageTitle} />
       <div className="page-body">
-        {error && (
-          <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '0.625rem', background: 'var(--color-error-container)', color: 'var(--color-on-error-container)', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <AlertCircle size={14} /> {error}
-          </div>
-        )}
+        {error && <Alert variant="error">{error}</Alert>}
 
         <div className="page-controls">
           {(role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) && (
-            <div className="card-action-row">
+            <div className="chip-group scroll-x">
               {['Global', 'Unit'].map((m) => (
                 <button key={m} className={`chip${viewMode === m ? ' active' : ''}`} onClick={() => setViewMode(m)}>{m} View</button>
               ))}
@@ -189,7 +111,12 @@ const Reports = () => {
           )}
 
           {viewMode === 'Unit' && (role === ROLES.ADMIN || role === ROLES.SUPER_ADMIN) && (
-            <Select value={selectedTeam} onChange={setSelectedTeam} options={[{ id: '', name: 'Select Unit' }, ...teams]} />
+            <Select 
+              value={selectedTeam} 
+              onChange={setSelectedTeam} 
+              options={teams} 
+              placeholder="Select Unit"
+            />
           )}
 
           <div className="card-action-row" style={{ marginLeft: 'auto', alignItems: 'center' }}>
@@ -199,9 +126,30 @@ const Reports = () => {
           </div>
         </div>
 
-        <KpiCards kpi={statsData.kpi} label={statsData.scopeLabel} />
+        <div className="grid-cols-4" style={{ marginBottom: '1.25rem' }}>
+          <KpiCard 
+            title="Total Hours" 
+            value={statsData.kpi?.hours || '0'} 
+            icon={Clock} 
+          />
+          <KpiCard 
+            title="Logs Submitted" 
+            value={statsData.kpi?.logs || '0'} 
+            icon={CheckCircle2} 
+          />
+          <KpiCard 
+            title="Events" 
+            value={statsData.kpi?.events || '0'} 
+            icon={CheckCircle2} 
+          />
+          <KpiCard 
+            title="Efficiency" 
+            value={statsData.kpi?.efficiency || '0%'} 
+            trend={{ isUp: parseInt(statsData.kpi?.efficiency || '0', 10) >= 80, label: 'Current period' }}
+          />
+        </div>
 
-        <div className="mobile-safe-grid" style={{ gridTemplateColumns: '1.5fr 1fr', marginBottom: '1rem' }}>
+        <div className="mobile-safe-grid stack-mobile" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
           <div className="card chart-card">
             <h3 style={{ margin: '0 0 1rem', fontSize: '0.9375rem', fontWeight: 600 }}>Weekly Engagement</h3>
             <ResponsiveContainer width="100%" height={240}>

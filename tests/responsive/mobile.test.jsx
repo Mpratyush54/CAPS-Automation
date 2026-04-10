@@ -19,7 +19,7 @@ import { ROLES } from '../../src/rbac';
 import Logs from '../../src/pages/Logs';
 import Login from '../../src/pages/Login';
 
-const renderWithRouter = (ui) => render(ui, { wrapper: BrowserRouter });
+import { renderWithAll } from '../test-utils';
 
 const installLogHandlers = (rows = []) => {
   server.use(
@@ -49,7 +49,7 @@ describe('Mobile Compatibility', () => {
       installLogHandlers([
         { _id: '1', title: 'Task A', workDate: '2026-03-25T00:00:00Z', durationMinutes: 60, status: 'draft', userId: 'U1' },
       ]);
-      const { container } = renderWithRouter(<Logs />);
+      const { container } = renderWithAll(<Logs />);
 
       // Desktop table wrapper
       const desktopTable = container.querySelector('.desktop-log-table');
@@ -62,20 +62,20 @@ describe('Mobile Compatibility', () => {
 
     it('renders a FAB (floating action button) for mobile "New Entry"', () => {
       installLogHandlers();
-      const { container } = renderWithRouter(<Logs />);
+      const { container } = renderWithAll(<Logs />);
       const fab = container.querySelector('.fab');
       expect(fab).toBeTruthy();
     });
 
     it('renders the hamburger menu button', () => {
       installLogHandlers();
-      renderWithRouter(<Logs />);
+      renderWithAll(<Logs />);
       expect(screen.getByLabelText(/Open menu/i)).toBeInTheDocument();
     });
 
     it('renders skeleton loaders in both desktop and mobile views while loading', () => {
       installLogHandlers();
-      const { container } = renderWithRouter(<Logs />);
+      const { container } = renderWithAll(<Logs />);
 
       // Desktop skeletons live inside `.desktop-log-table` <table>
       const desktopCells = container.querySelectorAll('.desktop-log-table td');
@@ -89,7 +89,7 @@ describe('Mobile Compatibility', () => {
 
   describe('Login Page – Mobile Layout', () => {
     it('renders at full viewport width with a max-width container', () => {
-      const { container } = renderWithRouter(<Login />);
+      const { container } = renderWithAll(<Login />);
       // The login page uses a centered container (maxWidth: '440px')
       const wrapper = container.firstChild;
       expect(wrapper).toBeTruthy();
@@ -99,7 +99,7 @@ describe('Mobile Compatibility', () => {
     });
 
     it('renders the Sign In and Sign Up mode tabs', () => {
-      renderWithRouter(<Login />);
+      renderWithAll(<Login />);
       // 'Sign In' appears in both the tab button and the submit button
       const signInElements = screen.getAllByText('Sign In');
       expect(signInElements.length).toBeGreaterThanOrEqual(2); // tab + submit
@@ -107,7 +107,7 @@ describe('Mobile Compatibility', () => {
     });
 
     it('renders the password visibility toggle', () => {
-      renderWithRouter(<Login />);
+      renderWithAll(<Login />);
       // Eye icon toggle button for show/hide password
       const eyeButtons = screen.getAllByRole('button');
       const toggleBtn = eyeButtons.find(b =>
@@ -120,14 +120,14 @@ describe('Mobile Compatibility', () => {
   describe('Responsive CSS contract', () => {
     it('confirms .search-bar exists for top bar search', () => {
       installLogHandlers();
-      const { container } = renderWithRouter(<Logs />);
+      const { container } = renderWithAll(<Logs />);
       const searchBars = container.querySelectorAll('.search-bar');
       expect(searchBars.length).toBeGreaterThan(0);
     });
 
     it('confirms filter chips are horizontally scrollable (card-action-row)', () => {
       installLogHandlers();
-      const { container } = renderWithRouter(<Logs />);
+      const { container } = renderWithAll(<Logs />);
       const actionRow = container.querySelector('.card-action-row');
       expect(actionRow).toBeTruthy();
     });
