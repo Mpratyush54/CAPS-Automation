@@ -99,7 +99,7 @@ const io = new Server(server, {
     cors: {
         origin: (origin, callback) => {
             const allowedOrigins = [
-                process.env.FRONTEND_URL || 'http://localhost:5174',
+                process.env.FRONTEND_URL || 'http://localhost:5174','http://192.168.1.6:5174',
                 'https://forum-gamma-one.vercel.app',
                 'http://localhost:3000',
             ];
@@ -258,7 +258,7 @@ app.use(helmet());
 app.use(cors({
     origin: (origin, callback) => {
         const allowedOrigins = [
-            process.env.FRONTEND_URL || 'http://localhost:5174',
+            process.env.FRONTEND_URL || 'http://localhost:5174','http://192.168.1.6:5174',
             'https://forum-gamma-one.vercel.app',
             'http://localhost:3000',
         ];
@@ -342,7 +342,7 @@ async function startServer() {
         await initCollections();
         connectRedis();
 
-        server.listen(PORT, () => {
+        server.listen(PORT,'0.0.0.0', () => {
             console.log(`🚀 Forum API running on port ${PORT}`);
         });
 
