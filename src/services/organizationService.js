@@ -6,7 +6,7 @@ export const organizationService = {
     const params = search ? { search } : {};
     const response = await api.get('/api/organization/teams', { params });
     const data = unwrap(response);
-    const rows = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
+    const rows = Array.isArray(data?.items) ? data.items : Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
     return rows.map(normalizeTeam);
   },
 
@@ -14,7 +14,7 @@ export const organizationService = {
     const params = teamId ? { teamId } : {};
     const response = await api.get('/api/organization/users/all', { params });
     const data = unwrap(response);
-    const users = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
+    const users = Array.isArray(data?.items) ? data.items : Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
     return users.map(normalizeUser);
   },
 

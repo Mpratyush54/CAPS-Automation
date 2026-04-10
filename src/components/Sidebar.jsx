@@ -54,26 +54,28 @@ const Sidebar = () => {
         </div>
 
         {/* Nav */}
-        <p className="section-label" style={{ marginTop: 0 }}>Organization</p>
-        <nav>
-          {navItems.map(({ to, icon, label }) => {
-            const Icon = ICONS[icon];
-            return (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-                onClick={handleNavClick}
-              >
-                {Icon && <Icon size={17} />}
-                <span>{label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
+        <div className="sidebar-nav-scroll">
+          <p className="section-label" style={{ marginTop: 0 }}>Organization</p>
+          <nav>
+            {navItems.map(({ to, icon, label }) => {
+              const Icon = ICONS[icon];
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+                  onClick={handleNavClick}
+                >
+                  {Icon && <Icon size={17} />}
+                  <span>{label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
+        </div>
 
         {/* User block */}
-        <div style={{ marginTop: 'auto' }}>
+        <div className="sidebar-session">
           <p className="section-label">Session</p>
           <div style={{ background: 'var(--color-surface-lowest)', borderRadius: '0.75rem', padding: '0.75rem', marginBottom: '0.75rem', boxShadow: 'var(--shadow-card)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>

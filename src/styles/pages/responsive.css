@@ -3,6 +3,13 @@
     display: grid !important;
     grid-template-columns: 1fr !important;
     gap: 1rem !important;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .profile-layout-mobile,
+  .profile-layout-mobile > * {
+    min-width: 0;
   }
 
   .event-grid-mobile {

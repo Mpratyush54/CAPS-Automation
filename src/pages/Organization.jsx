@@ -262,7 +262,7 @@ const Organization = () => {
         </div>
 
         <div className="mobile-safe-grid stack-mobile" style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 320px) minmax(0, 1fr)', alignItems: 'start', minHeight: 'calc(100vh - 12rem)', gap: '1.5rem' }}>
-          <div className="card" style={{ padding: '1rem', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: 'var(--color-surface-low)', border: '1px solid var(--color-outline-variant)' }}>
+          <div className="card" style={{ padding: '1rem', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: 'var(--color-surface-low)', border: '1px solid var(--color-outline-variant)', minWidth: 0 }}>
             <div className="card-flex-between" style={{ marginBottom: '1rem' }}>
               <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--color-on-surface-variant)' }}>Units Directory</h3>
               <button className="btn-ghost" style={{ padding: '0.25rem' }} onClick={() => refetchTeams()} title="Sync Signals"><RefreshCw size={14} /></button>
@@ -293,7 +293,8 @@ const Organization = () => {
                           borderRadius: '12px',
                           border: isActive ? '1px solid var(--color-primary-fixed)' : '1px solid transparent'
                         }} >
-                        <Building2 size={16} style={{ marginRight: '0.75rem', opacity: isActive ? 1 : 0.4 }} /> {team.name} </button>);
+                        <Building2 size={16} style={{ marginRight: '0.75rem', opacity: isActive ? 1 : 0.4 }} /> {team.name} </button>
+                        );
                   })}
                 </div>
               )}
@@ -322,7 +323,7 @@ const Organization = () => {
                   </div>
                 </div>
 
-                <div className="card table-card" style={{ height: 'fit-content', borderRadius: '24px', overflow: 'hidden', border: '1px solid var(--color-outline-variant)' }}>
+                <div className="card table-card" style={{ height: 'fit-content', borderRadius: '24px', border: '1px solid var(--color-outline-variant)' }}>
                   <div className="card-flex-between org-roster-header" style={{ padding: '1.5rem 2rem', background: 'var(--color-surface-low)', borderBottom: '1px solid var(--color-outline-variant)' }}>
                     <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800 }}>UNIT ROSTER <span style={{ opacity: 0.4, marginLeft: '8px', fontWeight: 400 }}>| {(selectedTeam?.members || []).length} Operatives</span></h3>
                     {canManageDirectory && (

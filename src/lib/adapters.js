@@ -104,6 +104,7 @@ export const normalizeTeam = (team) => {
   
   return {
     id: String(team._id || team.id || ''),
+    name: team.name || team.teamName || 'Unnamed Team',
     wingId: team.labelOneWingId || team.wingId || null,
     committeeId: team.labelTwoCommitteeId || team.committeeId || null,
     labelOne: team.labelOne || team.labelOneName || '',

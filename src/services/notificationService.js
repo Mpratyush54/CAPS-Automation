@@ -36,7 +36,11 @@ export const notificationService = {
   getRegisteredDevices: async () => {
     const response = await api.get('/api/notifications/devices');
     const data = unwrap(response);
-    return Array.isArray(data) ? data : (data?.items || []);
+    return Array.isArray(data)
+      ? data
+      : Array.isArray(data?.devices)
+        ? data.devices
+        : (data?.items || []);
   },
 
   getPublicKey: async () => {

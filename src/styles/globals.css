@@ -324,6 +324,18 @@ h6 {
   min-width: 0;
 }
 
+@media (max-width: 768px) {
+  .stack-mobile {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .stack-tablet {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 /* ── Section label ─────────────────────────────────────────── */
 .section-label {
   font-size: 0.6875rem;
@@ -500,15 +512,21 @@ h6 {
 /* ── Inputs ─────────────────────────────────────────────────── */
 .input-field {
   width: 100%;
-  padding: 0.625rem 0.875rem;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background: var(--color-surface-low);
   border: 1.5px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: 12px;
   font-size: 0.875rem;
   color: var(--color-on-surface);
   font-family: 'Inter', sans-serif;
   transition: all 0.15s ease;
   outline: none;
+  line-height: 1.2;
 }
 
 .input-field::placeholder {
@@ -521,12 +539,40 @@ h6 {
   box-shadow: 0 0 0 3px rgba(67, 67, 213, .1);
 }
 
+/* Select specific fixes */
+select.input-field {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  line-height: normal;
+  cursor: pointer;
+  padding-right: 36px;
+}
+
+input[type="date"].input-field,
+input[type="time"].input-field,
+input[type="datetime-local"].input-field {
+  padding-left: 14px;
+  padding-right: 14px;
+  line-height: 1.2;
+}
+
+textarea.input-field {
+  height: auto;
+  min-height: 88px;
+  padding: 12px 14px;
+  resize: none;
+  align-items: flex-start;
+}
+
 .input-label {
   display: block;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-on-surface-variant);
-  margin-bottom: 0.375rem;
+  margin-bottom: 6px;
+  min-height: 16px;
+  line-height: 1.4;
 }
 
 /* ── Badges ─────────────────────────────────────────────────── */
@@ -647,22 +693,25 @@ h6 {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1200;
-  backdrop-filter: blur(8px);
-  animation: fadeIn 0.3s ease;
-  padding: 1.5rem;
+  padding: 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .modal-box {
   background: var(--color-surface-lowest);
   border-radius: 1.5rem;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   width: 100%;
-  max-height: 90vh;
+  max-width: 100%;
+  max-height: calc(100vh - 3rem);
+  margin: auto;
   overflow: hidden;
   position: relative;
   display: flex;
@@ -672,6 +721,23 @@ h6 {
 @media (max-width: 768px) {
   .modal-overlay {
     left: 0;
+  }
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 480px) {
+  .modal-actions {
+    flex-direction: column-reverse;
+    gap: 0.75rem;
+  }
+  .modal-actions button {
+    width: 100%;
   }
 }
 
@@ -723,10 +789,9 @@ h6 {
   color: var(--color-outline);
 }
 
-/* ── Scrollbar ──────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -734,12 +799,12 @@ h6 {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-high);
+  background: var(--color-outline-variant);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-outline-variant);
+  background: var(--color-outline);
 }
 
 /* ── Notification item ──────────────────────────────────────── */
@@ -915,32 +980,44 @@ h6 {
     display: flex;
   }
 
-  /* Modals — slide up sheet */
+  /* Modals — full screen on mobile */
   .modal-overlay {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  /* Full modals (like workspace) shouldn't slide up like sheets */
-  .modal-overlay.full {
     align-items: stretch;
+    padding: 0;
+    justify-content: stretch;
   }
 
   .modal-box {
-    border-radius: 1.25rem 1.25rem 0 0;
-    max-width: 100%;
-    padding: 0; /* Remove padding here, handled by header/body */
-    display: flex;
-    flex-direction: column;
-    padding-bottom: env(safe-area-inset-bottom);
-    max-height: 92vh;
-    animation: modal-up 0.22s cubic-bezier(.4, 0, .2, 1);
+    border-radius: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none !important;
+    max-height: none;
+    animation: fadeIn 0.3s ease;
+    position: relative;
   }
 
-  .modal-overlay.full .modal-box {
-    border-radius: 0;
-    max-height: 100vh;
-    animation: fadeIn 0.3s ease;
+  .modal-header {
+    padding: 1rem 1.25rem;
+  }
+
+  .modal-body {
+    padding: 1.25rem;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  /* Organization modal mobile adjustments */
+  .modal-body form > div:first-child {
+    gap: 1rem;
+  }
+
+  .modal-body .stack-gap-05 {
+    gap: 0.75rem;
+  }
+
+  .modal-body .card-action-row {
+    gap: 0.5rem;
   }
 
   @keyframes modal-up {
@@ -1200,8 +1277,14 @@ h6 {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  padding: 1rem 2rem;
+  margin-bottom: 0.5rem;
   animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (max-width: 768px) {
+  .onboarding-container {
+    padding: 0.75rem 1rem;
+  }
 }
 
 .banner {

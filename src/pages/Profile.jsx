@@ -119,9 +119,9 @@ const Profile = () => {
       <div className="page-body">
         {error && <Alert variant="error" style={{ marginBottom: '1.5rem' }}>{error}</Alert>}
         
-        <div className="profile-layout-mobile" style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 350px) 1fr', gap: '2rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem', borderRadius: '24px', position: 'relative', overflow: 'hidden' }}>
+        <div className="profile-layout-mobile" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 350px) 1fr', gap: '2rem', minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', minWidth: 0 }}>
+            <div className="card" style={{ textAlign: 'center', padding: '3rem 1.5rem', borderRadius: '24px', position: 'relative', overflow: 'hidden', minWidth: 0 }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '120px', background: 'var(--gradient-primary)', opacity: 0.1 }} />
               
               <div style={{ position: 'relative', display: 'inline-block', marginBottom: '1.5rem', zIndex: 1 }}>

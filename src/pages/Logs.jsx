@@ -164,14 +164,14 @@ const LogFormModal = ({ initial, teams, onClose, onSave, role, user }) => {
           />
         </div>
 
-        <div className="modal-actions" style={{ marginTop: '0.5rem', gap: '8px' }}>
-          <button className="btn-ghost" onClick={onClose} style={{ flex: 1, borderRadius: '12px' }}>Cancel</button>
+        <div className="modal-actions" style={{ marginTop: '0.5rem', gap: '8px', flexWrap: 'wrap' }}>
+          <button className="btn-ghost" onClick={onClose} style={{ flex: '1 1 auto', minWidth: '100px', borderRadius: '12px' }}>Cancel</button>
           {form.status !== 'approved' && form.status !== 'completed' && (
-            <button className="btn-secondary" onClick={() => handleSave('draft')} style={{ flex: 1, borderRadius: '12px', fontWeight: 800, fontSize: '0.75rem' }}>
+            <button className="btn-secondary" onClick={() => handleSave('draft')} style={{ flex: '1 1 auto', minWidth: '120px', borderRadius: '12px', fontWeight: 800, fontSize: '0.75rem' }}>
               <Save size={14} /> Draft
             </button>
           )}
-          <button className="btn-primary" onClick={() => handleSave('pending_review')} style={{ flex: 1.5, borderRadius: '12px', fontWeight: 800, fontSize: '0.75rem' }}>
+          <button className="btn-primary" onClick={() => handleSave('pending_review')} style={{ flex: '1.5 1 auto', minWidth: '160px', borderRadius: '12px', fontWeight: 800, fontSize: '0.75rem' }}>
             <Send size={14} /> Submit Mission
           </button>
         </div>

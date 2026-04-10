@@ -4,13 +4,13 @@ export const momService = {
   getMoms: async () => {
     const response = await api.get('/api/moms');
     const data = unwrap(response);
-    return Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
+    return Array.isArray(data?.items) ? data.items : Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
   },
 
   getCategories: async () => {
     const response = await api.get('/api/moms/categories');
     const data = unwrap(response);
-    return Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
+    return Array.isArray(data?.items) ? data.items : Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
   },
 
   createMom: async (data) => {

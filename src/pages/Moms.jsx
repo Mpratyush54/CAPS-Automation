@@ -41,7 +41,7 @@ const MomFormModal = ({ initial, teams, categories, onClose, onSave, user }) => 
     meetingDate: initial?.meetingDate?.split('T')[0] || new Date().toISOString().split('T')[0],
     category: initial?.category || '',
     meetingType: initial?.meetingType || 'Tactical Sync',
-    selectedAttendees: initial?.selectedAttendees || [],
+    attendees: Array.isArray(initial?.attendees) ? initial.attendees.join('\n') : (initial?.attendees || ''),
     agenda: initial?.agenda || '',
     pointsDiscussed: initial?.pointsDiscussed || '',
     deadlinesSet: initial?.deadlinesSet || '',
@@ -75,14 +75,7 @@ const MomFormModal = ({ initial, teams, categories, onClose, onSave, user }) => 
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const toggleAttendee = (userId) => {
-    setForm(prev => ({
-      ...prev,
-      selectedAttendees: prev.selectedAttendees.includes(userId)
-        ? prev.selectedAttendees.filter(id => id !== userId)
-        : [...prev.selectedAttendees, userId]
-    }));
-  };
+  // Attendee tracking is now standard text input
 
   const handleCaptureLocation = () => {
     if ("geolocation" in navigator) {
@@ -102,16 +95,12 @@ const MomFormModal = ({ initial, teams, categories, onClose, onSave, user }) => 
     }
     setSubmitting(true);
     try {
-      const attendeeNames = members
-        .filter(m => form.selectedAttendees.includes(m._id || m.id))
-        .map(m => m.name);
-      
       const payload = {
         title: form.title,
         meetingDate: form.meetingDate,
         category: form.category,
         meetingType: form.meetingType,
-        attendees: attendeeNames.join(', '),
+        attendees: form.attendees,
         agenda: form.agenda,
         pointsDiscussed: form.pointsDiscussed,
         deadlinesSet: form.deadlinesSet,
@@ -158,87 +147,96 @@ const MomFormModal = ({ initial, teams, categories, onClose, onSave, user }) => 
   };
 
   return (
-    <Modal title={initial ? 'Configure Protocol Signature' : 'Initialize Mission Protocol (MOM)'} onClose={onClose} maxWidth="820px">
-      <form onSubmit={handleSave} style={{ display: 'grid', gap: '1.5rem', background: 'var(--color-surface-lowest)', padding: '0.25rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.25rem' }}>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Protocol Subject *</label>
-            <input className="input-field" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} placeholder="e.g. Operation Alpha Strategy Sync" value={form.title} onChange={(e) => set('title', e.target.value)} required />
+    <Modal title={initial ? 'Configure Minutes' : 'Initialize Minutes of the Meeting (MOM)'} onClose={onClose} maxWidth="700px">
+      <form onSubmit={(e) => { e.preventDefault(); handleSave(e); }} style={{ display: 'grid', gap: '1.5rem', background: 'var(--color-surface-lowest)', padding: '0.25rem' }}>
+        
+        {isAdmin && (
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Which team are you a part of? *</label>
+            <select
+              className="input-field"
+              value={form.teamId}
+              style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }}
+              onChange={(e) => set('teamId', e.target.value)}
+              required
+            >
+              <option value="">Select Team</option>
+              {teams.map(t => (
+                <option key={t.id} value={t.id}>
+                  [{t.type?.toUpperCase()}] {t.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Classification *</label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <select className="input-field" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} value={form.category} onChange={(e) => set('category', e.target.value)} required>
-                 <option value="">Select Level</option>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '1.25rem' }} className="stack-mobile">
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Meeting name *</label>
+            <input className="input-field" placeholder="Operational title..." style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} value={form.title} onChange={(e) => set('title', e.target.value)} required />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '8px' }}>
+              <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 0 }}>What does the meeting fall under? *</label>
+              {isAdmin && (
+                <button type="button" onClick={() => setAddingCat(!addingCat)} className="btn-ghost sm" style={{ padding: '0 4px', fontSize: '0.65rem', color: 'var(--color-primary)' }}>
+                  {addingCat ? 'Cancel' : '+ New Category'}
+                </button>
+              )}
+            </div>
+            
+            {addingCat ? (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input className="input-field" placeholder="e.g. Wings, EC..." style={{ borderRadius: '12px', background: 'var(--color-surface-low)', flex: 1 }} value={newCat} onChange={(e) => setNewCat(e.target.value)} autoFocus />
+                <button type="button" className="btn-primary" onClick={handleAddCategory} disabled={!newCat.trim()} style={{ borderRadius: '12px' }}>Add</button>
+              </div>
+            ) : (
+              <select className="input-field" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} value={form.category} onChange={(e) => set('category', e.target.value)} required={!addingCat}>
+                 <option value="">Wings, Committees, EC...</option>
                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-            </div>
+            )}
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Session Date *</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }} className="stack-mobile">
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Date *</label>
             <input type="date" className="input-field" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} value={form.meetingDate} onChange={(e) => set('meetingDate', e.target.value)} required />
           </div>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Deployment Type *</label>
-            <input className="input-field" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} placeholder="In-Person / Remote" value={form.meetingType} onChange={(e) => set('meetingType', e.target.value)} required />
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Meeting Type *</label>
+            <input className="input-field" placeholder="In-Person / Remote" style={{ borderRadius: '12px', background: 'var(--color-surface-low)' }} value={form.meetingType} onChange={(e) => set('meetingType', e.target.value)} required />
           </div>
         </div>
 
-        <div>
-          <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Attendee Roster *</label>
-          <div style={{ 
-             display: 'flex', flexWrap: 'wrap', gap: '6px', 
-             maxHeight: '130px', overflowY: 'auto', 
-             border: '1.5px solid var(--color-outline-variant)', 
-             padding: '1rem', borderRadius: '16px', background: 'var(--color-surface-low)' 
-          }}>
-             {membersLoading ? <div style={{ width: '100%', padding: '1rem', textAlign: 'center', opacity: 0.5 }}>Syncing local roster...</div> : members.map(m => {
-               const isActive = form.selectedAttendees.includes(m._id || m.id);
-               return (
-                 <button
-                    key={m._id || m.id}
-                    type="button"
-                    onClick={() => toggleAttendee(m._id || m.id)}
-                    className="btn-ghost sm"
-                    style={{ 
-                      fontSize: '0.75rem', borderRadius: '10px', fontWeight: 700,
-                      background: isActive ? 'var(--color-primary-fixed)' : 'transparent',
-                      color: isActive ? 'var(--color-primary)' : 'inherit',
-                      border: isActive ? '1px solid var(--color-primary-fixed)' : '1px solid var(--color-outline-variant)'
-                    }}
-                 >
-                    {m.name}
-                 </button>
-               );
-             })}
+        <div style={{ minWidth: 0 }}>
+          <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>Meeting Attendees (Write the names in numbered points) *</label>
+          <textarea className="input-field" rows={4} style={{ borderRadius: '12px', resize: 'vertical', background: 'var(--color-surface-low)' }} placeholder="1. John Doe\n2. Jane Smith..." value={form.attendees} onChange={(e) => set('attendees', e.target.value)} required />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }} className="stack-mobile">
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Agenda *</label>
+            <textarea className="input-field" rows={3} style={{ borderRadius: '12px', resize: 'none', background: 'var(--color-surface-low)' }} placeholder="Primary mission objectives..." value={form.agenda} onChange={(e) => set('agenda', e.target.value)} required />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Deadlines Set *</label>
+            <textarea className="input-field" rows={3} style={{ borderRadius: '12px', resize: 'none', background: 'var(--color-surface-low)' }} placeholder="Critical unit deliverables..." value={form.deadlinesSet} onChange={(e) => set('deadlinesSet', e.target.value)} required />
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem' }}>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Operational Agenda *</label>
-            <textarea className="input-field" rows={3} style={{ borderRadius: '12px', background: 'var(--color-surface-low)', resize: 'none' }} placeholder="Primary mission objectives..." value={form.agenda} onChange={(e) => set('agenda', e.target.value)} required />
-          </div>
-          <div>
-            <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Actionable Deadlines</label>
-            <textarea className="input-field" rows={3} style={{ borderRadius: '12px', background: 'var(--color-surface-low)', resize: 'none' }} placeholder="Critical unit deliverables..." value={form.deadlinesSet} onChange={(e) => set('deadlinesSet', e.target.value)} />
-          </div>
+        <div style={{ minWidth: 0 }}>
+          <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Points Discussed (In numbered points) *</label>
+          <textarea className="input-field" rows={5} style={{ borderRadius: '12px', resize: 'none', background: 'var(--color-surface-low)' }} placeholder="Synthesize the mission results, dialogue, and final decisions..." value={form.pointsDiscussed} onChange={(e) => set('pointsDiscussed', e.target.value)} required />
         </div>
 
-        <div>
-          <label className="input-label" style={{ fontWeight: 800, fontSize: '0.65rem', textTransform: 'uppercase' }}>Intelligence Synthesis (Points Discussed) *</label>
-          <textarea className="input-field" rows={6} style={{ borderRadius: '14px', background: 'var(--color-surface-low)', resize: 'none', lineHeight: 1.6 }} placeholder="Synthesize the mission results, dialogue, and final decisions..." value={form.pointsDiscussed} onChange={(e) => set('pointsDiscussed', e.target.value)} required />
-        </div>
-
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', background: 'var(--color-surface-low)', padding: '1.25rem', borderRadius: '16px', border: '1px solid var(--color-outline-variant)' }}>
-           <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', background: 'var(--color-surface-low)', padding: '1.25rem', borderRadius: '16px', border: '1px solid var(--color-outline-variant)' }}>
+           <div style={{ flex: 1, minWidth: '200px' }}>
               <label className="input-label" style={{ marginBottom: '2px', fontWeight: 800, fontSize: '0.7rem' }}>Verification Artifacts *</label>
               <p style={{ margin: 0, fontSize: '0.65rem', fontWeight: 600, color: 'var(--color-on-surface-variant)', textTransform: 'uppercase' }}>Secure photo & location coordinates</p>
            </div>
-           <div style={{ display: 'flex', gap: '8px' }}>
+           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
              <button type="button" className={`btn-ghost sm ${form.geotag ? 'active' : ''}`} style={{ borderRadius: '10px' }} onClick={handleCaptureLocation}>
                 <MapPin size={16} /> {form.geotag ? 'Signal Fixed' : 'Geotag Signal'}
              </button>
@@ -260,10 +258,10 @@ const MomFormModal = ({ initial, teams, categories, onClose, onSave, user }) => 
           </div>
         )}
 
-        <div className="modal-actions" style={{ marginTop: '0.5rem', gap: '8px' }}>
-          <button type="button" className="btn-ghost" onClick={onClose} style={{ flex: 1, borderRadius: '12px' }}>Abort Mission</button>
-          <button type="submit" className="btn-primary" disabled={submitting} style={{ flex: 2, padding: '14px', borderRadius: '12px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1px' }}>
-             {submitting ? 'Transmitting...' : 'Dispatch Protocol'}
+        <div className="modal-actions" style={{ marginTop: '0.75rem', gap: '12px', flexWrap: 'wrap' }}>
+          <button type="button" className="btn-secondary" onClick={onClose} style={{ flex: '1 1 auto', minWidth: '120px' }}>Cancel</button>
+          <button type="submit" className="btn-primary-glow" disabled={submitting} style={{ flex: '2 1 auto', minWidth: '200px', padding: '12px' }}>
+             {submitting ? 'Submitting...' : 'Submit Minutes'}
           </button>
         </div>
       </form>
@@ -301,7 +299,7 @@ const ViewModal = ({ mom, onClose, onStatusChange }) => {
   };
 
   return (
-    <Modal title="Secure Protocol Insight" onClose={onClose} maxWidth="850px">
+    <Modal title="Minutes of the Meeting Insight" onClose={onClose} maxWidth="850px">
       <div style={{ display: 'grid', gap: '2rem', background: 'var(--color-surface-lowest)', padding: '0.25rem', maxHeight: '75vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem' }}>
           <div style={{ flex: 1 }}>
@@ -321,17 +319,17 @@ const ViewModal = ({ mom, onClose, onStatusChange }) => {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2.5rem' }}>
           <div>
-             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Operational Objectives</label>
+             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Agenda</label>
              <p style={{ fontSize: '1rem', lineHeight: 1.8, color: 'var(--color-on-surface)', fontWeight: 500 }}>{mom.agenda}</p>
           </div>
           <div>
-             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Registry of Personnel</label>
+             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Meeting Attendees</label>
              <div style={{ fontSize: '0.9rem', whiteSpace: 'pre-line', lineHeight: 1.7, fontWeight: 600, opacity: 0.8 }}>{mom.attendees}</div>
           </div>
         </div>
 
         <div>
-           <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Meeting Intelligence Synthesis</label>
+           <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Points Discussed</label>
            <div style={{ fontSize: '1.05rem', whiteSpace: 'pre-line', lineHeight: 1.9, background: 'var(--color-surface-low)', padding: '2rem', borderRadius: '24px', border: '1px solid var(--color-outline-variant)', color: 'var(--color-on-surface)', boxShadow: '0 8px 16px rgba(0,0,0,0.02)' }}>
               {mom.pointsDiscussed}
            </div>
@@ -339,7 +337,7 @@ const ViewModal = ({ mom, onClose, onStatusChange }) => {
 
         {mom.deadlinesSet && (
           <div>
-             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Critical Deliverables</label>
+             <label className="input-label" style={{ fontWeight: 900, fontSize: '0.65rem', color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid var(--color-outline-variant)', pb: '8px', mb: '16px', display: 'block' }}>Deadlines Set</label>
              <div style={{ fontSize: '1rem', whiteSpace: 'pre-line', lineHeight: 1.7, fontWeight: 600, color: 'var(--color-on-surface)' }}>{mom.deadlinesSet}</div>
           </div>
         )}
@@ -348,14 +346,14 @@ const ViewModal = ({ mom, onClose, onStatusChange }) => {
           {isPending && canApprove && (
             <>
               <button className="btn-primary" disabled={processing} onClick={() => handleUpdateStatus('approved')} style={{ flex: 1.5, borderRadius: '14px', fontWeight: 900 }}>
-                {processing ? 'Processing...' : 'Authorize Protocol'}
+                {processing ? 'Processing...' : 'Approve Minutes'}
               </button>
               <button className="btn-ghost" style={{ color: 'var(--color-error)', flex: 1, borderRadius: '14px', fontWeight: 700 }} disabled={processing} onClick={() => handleUpdateStatus('needs_revision')}>
                 Issue Revision
               </button>
             </>
           )}
-          <button className="btn-secondary" onClick={onClose} disabled={processing} style={{ flex: 1, borderRadius: '14px', fontWeight: 700 }}>Exit Directive</button>
+          <button className="btn-secondary" onClick={onClose} disabled={processing} style={{ flex: 1, borderRadius: '14px', fontWeight: 700 }}>Close</button>
         </div>
       </div>
     </Modal>
@@ -387,15 +385,15 @@ const Moms = () => {
 
   return (
     <>
-      <TopBar title="Mission Protocols (MOM)" />
+      <TopBar title="Minutes of the Meeting (MOM)" />
       <div className="page-body">
          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2.5rem', flexWrap: 'wrap', gap: '1.5rem' }}>
             <div>
-               <h1 style={{ fontSize: '2rem', fontWeight: 900, margin: 0, letterSpacing: '-0.5px' }}>Operation Archives</h1>
-               <p style={{ margin: '0.75rem 0 0', fontSize: '1rem', color: 'var(--color-on-surface-variant)', fontWeight: 600 }}>Archival and verification repository for strategic collaborative intelligence.</p>
+               <h1 style={{ fontSize: '2rem', fontWeight: 900, margin: 0, letterSpacing: '-0.5px' }}>Meeting Archives</h1>
+               <p style={{ margin: '0.75rem 0 0', fontSize: '1rem', color: 'var(--color-on-surface-variant)', fontWeight: 600 }}>Archival and verification repository for meeting minutes.</p>
             </div>
             <button className="btn-primary" onClick={() => setModal({ type: 'add' })} style={{ padding: '0.875rem 1.75rem', borderRadius: '14px', fontWeight: 900 }}>
-               <PlusCircle size={22} /> Generate New Protocol
+               <PlusCircle size={22} /> Initialize MOM
             </button>
          </div>
 

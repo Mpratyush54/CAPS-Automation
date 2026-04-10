@@ -4,12 +4,16 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/auth';
 import { getNavItems } from '../../rbac';
+import { useSidebarStore } from '../../store/sidebar';
 
 const NAV_ICONS = { LayoutDashboard, ClipboardList, Calendar, BarChart3, Building2, Bell, FileText };
 
 const MobileNav = () => {
   const { role } = useAuthStore();
+  const { isOpen } = useSidebarStore();
   const navItems = getNavItems(role).slice(0, 5);
+
+  if (isOpen) return null;
 
   return (
     <nav className="mobile-nav" aria-label="Mobile navigation">
