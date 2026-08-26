@@ -1,16 +1,27 @@
-# React + Vite
+# CAPS-Automation (GitHub mirror / ops toolkit)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Operations and automation work tied to the **CAPS** ecosystem at CHRIST University, Kengeri.
 
-Currently, two official plugins are available:
+The **production portal** (events, QR attendance, certificates, reports, 5-tier RBAC) lives on GitLab and is deployed at:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+**https://worklog.capskengeri.com**
 
-## React Compiler
+## What CAPS ops covers
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Event creation & registration
+- QR-based attendance
+- Bulk certificate generation
+- PDF / Excel reporting
+- PWA push notifications & offline queues
+- Role-based team workflows
 
-## Expanding the ESLint configuration
+## Stack
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+`JavaScript` `Node.js` `React` `Docker` (portal stack primarily on GitLab CI)
+
+## Links
+
+- Live portal: [worklog.capskengeri.com](https://worklog.capskengeri.com)
+- Club site: [capskengeri.com](https://capskengeri.com)
+- Portfolio: [pratyushes.dev](https://pratyushes.dev)
+- Author: [Mpratyush54](https://github.com/Mpratyush54)
